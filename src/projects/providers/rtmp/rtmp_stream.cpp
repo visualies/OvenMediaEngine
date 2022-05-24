@@ -1102,16 +1102,16 @@ namespace pvd
 		// If this algorithm causes latency, it may be better to use meta data from AmfMeta.
 		// But AmfMeta is not always correct so we need more consideration
 
-		// It makes this stream video only
-		else if (_media_info->video_stream_coming == true && _stream_message_cache_video_count > MAX_STREAM_MESSAGE_COUNT / 2)
-		{
-			return true;
-		}
-		// It makes this stream audio only
-		else if (_media_info->audio_stream_coming == true && _stream_message_cache_audio_count > MAX_STREAM_MESSAGE_COUNT / 2)
-		{
-			return true;
-		}
+		// // It makes this stream video only
+		// else if (_media_info->video_stream_coming == true && _stream_message_cache_video_count > MAX_STREAM_MESSAGE_COUNT / 2)
+		// {
+		// 	return true;
+		// }
+		// // It makes this stream audio only
+		// else if (_media_info->audio_stream_coming == true && _stream_message_cache_audio_count > MAX_STREAM_MESSAGE_COUNT / 2)
+		// {
+		// 	return true;
+		// }
 
 		return false;
 	}
