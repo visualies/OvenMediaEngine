@@ -1,4 +1,4 @@
-FROM    debian:bullseye AS base
+FROM    debian:latest AS base
 
 ## Install libraries by package
 ENV     DEBIAN_FRONTEND=noninteractive
