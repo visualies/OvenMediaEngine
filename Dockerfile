@@ -1,4 +1,4 @@
-FROM    ubuntu:20.04 AS base
+FROM    debian:bullseye AS base
 
 ## Install libraries by package
 ENV     DEBIAN_FRONTEND=noninteractive
