@@ -1,4 +1,4 @@
-FROM    debian:latest AS base
+FROM    ubuntu:arm64v8 AS base
 
 ## Install libraries by package
 ENV     DEBIAN_FRONTEND=noninteractive
