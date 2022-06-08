@@ -1,4 +1,4 @@
-FROM    arm64v8/ubuntu AS base
+FROM    arm64v8/ubuntu:20.04 AS base
 
 ## Install libraries by package
 ENV     DEBIAN_FRONTEND=noninteractive
