@@ -10,13 +10,16 @@
 
 VideoTrack::VideoTrack()
 	: _framerate(0),
+	  _estimate_framerate(0),
 	  _video_timescale(0),
 	  _width(0),
 	  _height(0),
-	  _format(0),
-	  _preset(""),
+	  _key_frame_interval(0),
+	  _b_frames(0),
 	  _has_bframe(false),
+	  _preset(""),
 	  _thread_count(0)
+
 {
 }
 
@@ -35,7 +38,7 @@ void VideoTrack::SetEstimateFrameRate(double framerate)
 	_estimate_framerate = framerate;
 }
 
-double VideoTrack::GetEsimateFrameRate() const
+double VideoTrack::GetEstimateFrameRate() const
 {
 	return _estimate_framerate;
 }
@@ -58,16 +61,6 @@ void VideoTrack::SetHeight(int32_t height)
 int32_t VideoTrack::GetHeight() const
 {
 	return _height;
-}
-
-void VideoTrack::SetFormat(int32_t format)
-{
-	_format = format;
-}
-
-int32_t VideoTrack::GetFormat() const
-{
-	return _format;
 }
 
 void VideoTrack::SetVideoTimestampScale(double scale)
@@ -126,7 +119,7 @@ ov::String VideoTrack::GetPreset() const
 	return _preset;
 }
 
-void VideoTrack::SetBframes(bool has_bframe)
+void VideoTrack::SetHasBframes(bool has_bframe)
 {
 	_has_bframe = has_bframe;
 }
@@ -141,7 +134,37 @@ void VideoTrack::SetThreadCount(int thread_count)
 	_thread_count = thread_count;
 }
 
-int VideoTrack::GetThreadCount() 
+int VideoTrack::GetThreadCount()
 {
 	return _thread_count;
+}
+
+void VideoTrack::SetKeyFrameInterval(int32_t key_frame_interval)
+{
+	_key_frame_interval = key_frame_interval;
+}
+
+int32_t VideoTrack::GetKeyFrameInterval()
+{
+	return _key_frame_interval;
+}
+
+void VideoTrack::SetBFrames(int32_t b_frames)
+{
+	_b_frames = b_frames;
+}
+
+int32_t VideoTrack::GetBFrames()
+{
+	return _b_frames;
+}
+
+void VideoTrack::SetColorspace(int colorspace)
+{
+	_colorspace = colorspace;
+}
+
+int VideoTrack::GetColorspace() const
+{
+	return _colorspace;
 }

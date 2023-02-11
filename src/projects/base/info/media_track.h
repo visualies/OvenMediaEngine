@@ -11,7 +11,9 @@
 #include "video_track.h"
 #include "audio_track.h"
 
-#define VALID_BITRATE_CALCULATION_THRESHOLD_MSEC (2000)
+#define VALID_BITRATE_CALCULATION_THRESHOLD_MSEC (1000)
+
+typedef uint32_t MediaTrackId;
 
 class MediaTrack : public VideoTrack, public AudioTrack
 {
@@ -24,9 +26,17 @@ public:
 	void SetId(uint32_t id);
 	uint32_t GetId() const;
 
-	// Track Name (used for variant playlist)
-	void SetName(const ov::String &name);
-	ov::String GetName() const;
+	// Variant Name (used for rendition of playlist)
+	void SetVariantName(const ov::String &name);
+	ov::String GetVariantName() const;
+
+	// Public Name (used for multiple audio/video tracks. e.g. multilingual audio)
+	void SetPublicName(const ov::String &name);
+	ov::String GetPublicName() const;
+
+	// Language (rfc5646)
+	void SetLanguage(const ov::String &language);
+	ov::String GetLanguage() const;
 
 	// Video Type Settings
 	void SetMediaType(cmn::MediaType type);
@@ -35,6 +45,9 @@ public:
 	// Codec Settings
 	void SetCodecId(cmn::MediaCodecId id);
 	cmn::MediaCodecId GetCodecId() const;
+
+	void SetCodecLibraryId(cmn::MediaCodecLibraryId id);
+	cmn::MediaCodecLibraryId GetCodecLibraryId() const;
 
 	// Origin bitstream foramt
 	void SetOriginBitstream(cmn::BitstreamFormat format);
@@ -58,10 +71,11 @@ public:
 
 	// Bypass Settings
 	void SetBypass(bool flag);
-	bool IsBypass();
+	bool IsBypass() const;
 
 	ov::String GetInfoString();
 	bool IsValid();
+	bool HasQualityMeasured();
 
 	// Define extradata by codec
 	//  H264 : AVCDecoderConfigurationRecord
@@ -78,11 +92,20 @@ public:
 
 private:
 	bool _is_valid = false;
+	bool _has_quality_measured = false;
 
 	uint32_t _id;
-	ov::String _name;
+
+	// Variant Name : Original encoder profile that made this track 
+	// from <OutputProfile><Encodes>(<Video> || <Audio> || <Image>)<Name>
+	ov::String _variant_name;
+
+	// Set by AudioMap or VideoMap
+	ov::String _public_name;
+	ov::String _language;
 
 	cmn::MediaCodecId _codec_id;
+	cmn::MediaCodecLibraryId _codec_library_id;
 	cmn::BitstreamFormat _origin_bitstream_format = cmn::BitstreamFormat::Unknown;
 	cmn::MediaType _media_type;
 	cmn::Timebase _time_base;
@@ -105,4 +128,9 @@ private:
 
 	uint64_t _total_frame_count = 0;
 	uint64_t _total_frame_bytes = 0;
+
+public:
+	void SetHardwareAccel(bool hwaccel);
+	bool GetHardwareAccel() const;
+	bool _use_hwaccel;
 };

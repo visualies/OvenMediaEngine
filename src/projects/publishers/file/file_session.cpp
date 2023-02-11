@@ -161,10 +161,15 @@ namespace pub
 
 			// If the selected track list exists. if the current trackid does not exist on the list, ignore it.
 			// If no track list is selected, save all tracks.
-			auto selected_tracks = GetRecord()->GetStream().GetTracks();
-			if ((selected_tracks.empty() != true) && selected_tracks.find(track->GetId()) == selected_tracks.end())
+			auto selected_track_ids = GetRecord()->GetTrackIds();
+			auto selected_track_names = GetRecord()->GetTrackNames();
+			if (selected_track_ids.size() > 0 || selected_track_names.size() > 0)
 			{
-				continue;
+				if ((find(selected_track_ids.begin(), selected_track_ids.end(), track->GetId()) == selected_track_ids.end()) &&
+					(find(selected_track_names.begin(), selected_track_names.end(), track->GetVariantName()) == selected_track_names.end()))
+				{
+					continue;
+				}
 			}
 
 			if (FileWriter::IsSupportCodec(output_format, track->GetCodecId()) == false)
@@ -172,6 +177,9 @@ namespace pub
 				logtw("%s format does not support the codec(%d)", output_format.CStr(), track->GetCodecId());
 				continue;
 			}
+
+			// Choose default track of recording stream
+			UpdateDefaultTrack(track);
 
 			auto track_info = FileTrackInfo::Create();
 
@@ -191,6 +199,8 @@ namespace pub
 			}
 		}
 
+		logtd("default track id is %d", _default_track);
+
 		if (_writer->Start() == false)
 		{
 			_writer = nullptr;
@@ -203,6 +213,25 @@ namespace pub
 		logtd("Recording started. id: %d", GetId());
 
 		return true;
+	}
+
+	// Select the first video track as the default track.
+	// If there is no video track, the first track of the audio is selected as the default track.
+	void FileSession::UpdateDefaultTrack(const std::shared_ptr<MediaTrack> &track)
+	{
+		if (_default_track_by_type.find(track->GetMediaType()) == _default_track_by_type.end())
+		{
+			_default_track_by_type[track->GetMediaType()] = track->GetId();
+
+			if (_default_track_by_type.find(cmn::MediaType::Video) != _default_track_by_type.end())
+			{
+				_default_track = _default_track_by_type[cmn::MediaType::Video];
+			}
+			else if (_default_track_by_type.find(cmn::MediaType::Audio) != _default_track_by_type.end())
+			{
+				_default_track = _default_track_by_type[cmn::MediaType::Audio];
+			}
+		}
 	}
 
 	bool FileSession::StopRecord()
@@ -304,35 +333,25 @@ namespace pub
 			return;
 		}
 
-		if (_writer != nullptr)
+		// Drop until the first keyframe of the main track is received.
+		if (_found_first_keyframe == false)
 		{
-			bool ret = _writer->PutData(
-				session_packet->GetTrackId(),
-				session_packet->GetPts(),
-				session_packet->GetDts(),
-				session_packet->GetFlag(),
-				session_packet->GetBitstreamFormat(),
-				session_packet->GetData());
-
-			if (ret == false)
+			if ((_default_track == session_packet->GetTrackId() && session_packet->GetFlag() == MediaPacketFlag::Key) == true)
 			{
-				SetState(SessionState::Error);
-				GetRecord()->SetState(info::Record::RecordState::Error);
-
-				_writer->Stop();
-				_writer = nullptr;
-
+				_found_first_keyframe = true;
+			}
+			else
+			{
+				GetRecord()->UpdateRecordStartTime();
 				return;
 			}
-
-			GetRecord()->UpdateRecordTime();
-			GetRecord()->IncreaseRecordBytes(session_packet->GetData()->GetLength());
 		}
 
 		bool need_file_split = false;
 
 		// When setting interval parameter, perform segmentation recording.
-		if ((uint64_t)GetRecord()->GetInterval() > 0 && (GetRecord()->GetRecordTime() > (uint64_t)GetRecord()->GetInterval()))
+		if (((uint64_t)GetRecord()->GetInterval() > 0) && (GetRecord()->GetRecordTime() > (uint64_t)GetRecord()->GetInterval()) &&
+			(session_packet->GetFlag() == MediaPacketFlag::Key) && (session_packet->GetTrackId() == _default_track))
 		{
 			need_file_split = true;
 		}
@@ -360,6 +379,31 @@ namespace pub
 		if (need_file_split)
 		{
 			Split();
+		}
+
+		if (_writer != nullptr)
+		{
+			bool ret = _writer->PutData(
+				session_packet->GetTrackId(),
+				session_packet->GetPts(),
+				session_packet->GetDts(),
+				session_packet->GetFlag(),
+				session_packet->GetBitstreamFormat(),
+				session_packet->GetData());
+
+			if (ret == false)
+			{
+				SetState(SessionState::Error);
+				GetRecord()->SetState(info::Record::RecordState::Error);
+
+				_writer->Stop();
+				_writer = nullptr;
+
+				return;
+			}
+
+			GetRecord()->UpdateRecordTime();
+			GetRecord()->IncreaseRecordBytes(session_packet->GetData()->GetLength());
 		}
 	}
 

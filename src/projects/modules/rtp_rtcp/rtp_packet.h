@@ -40,7 +40,7 @@ class RtpPacket
 public:
 	RtpPacket();
 	RtpPacket(const std::shared_ptr<const ov::Data> &data);
-	RtpPacket(RtpPacket &src);
+	RtpPacket(const RtpPacket &src);
 	virtual ~RtpPacket();
 
 	// Parse from Data
@@ -84,9 +84,10 @@ public:
 	uint8_t*	AllocatePayload(size_t size_bytes);
 	uint8_t*	Header() const;
 	uint8_t*	Payload() const;
+	uint8_t* 	Extension(uint8_t id) const;
 
 	// Data
-	std::shared_ptr<ov::Data> GetData();
+	std::shared_ptr<ov::Data> GetData() const;
 
 	// Created time
 	std::chrono::system_clock::time_point GetCreatedTime();
@@ -95,6 +96,9 @@ public:
 	ov::String	Dump();
 
 	// Extensions for OME specific
+	void		SetTrackId(uint32_t track_id) { _track_id = track_id; }
+	uint32_t	GetTrackId() const { return _track_id; }
+
 	void		SetNTPTimestamp(uint64_t nts) {_ntp_timestamp = nts;}
 	uint64_t	NTPTimestamp() const {return _ntp_timestamp;}
 
@@ -109,6 +113,9 @@ public:
 
 	void		SetRtspChannel(uint32_t rtsp_channel) {_rtsp_channel = rtsp_channel;}
 	uint32_t	GetRtspChannel() const {return _rtsp_channel;}
+
+	// Get Extension Type
+	RtpHeaderExtension::HeaderType GetExtensionType() const { return _extension_type; }
 
 protected:
 	size_t		_payload_offset = 0;	// Payload Start Point (Header size)
@@ -127,6 +134,10 @@ protected:
 	size_t		_extension_size;
 	std::map<uint8_t, ov::Data> _extensions;
 
+	// extension ID : data offset
+	RtpHeaderExtension::HeaderType _extension_type;
+	std::map<uint8_t, off_t> _extension_buffer_offset;
+
 	bool		_is_available = false;
 
 	// std::vector<uint8_t>	_buffer;
@@ -137,6 +148,7 @@ protected:
 	std::chrono::system_clock::time_point _created_time;
 
 	// Extensions for OME specific
+	uint32_t	_track_id = 0;
 	uint64_t	_ntp_timestamp = 0;
 	bool		_is_video_packet = false;
 	bool		_is_keyframe = false;

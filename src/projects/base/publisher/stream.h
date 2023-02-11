@@ -90,6 +90,7 @@ namespace pub
 		// Child must implement this function for packetizing and call BroadcastPacket to delivery to all sessions.
 		virtual void SendVideoFrame(const std::shared_ptr<MediaPacket> &media_packet) = 0;
 		virtual void SendAudioFrame(const std::shared_ptr<MediaPacket> &media_packet) = 0;
+		virtual void SendDataFrame(const std::shared_ptr<MediaPacket> &media_packet) = 0;
 
 		virtual bool Start();
 		virtual bool Stop();
@@ -101,8 +102,14 @@ namespace pub
 
 		uint32_t IssueUniqueSessionId();
 
-		std::shared_ptr<Application> GetApplication();
-		const char * GetApplicationTypeName();
+		std::shared_ptr<Application> GetApplication() const;
+		const char * GetApplicationTypeName() const;
+
+		// Set the stream state
+		void SetState(State state)
+		{
+			_state = state;
+		}
 
 		State GetState() const
 		{

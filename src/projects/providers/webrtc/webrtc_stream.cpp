@@ -16,14 +16,14 @@
 
 namespace pvd
 {
-	std::shared_ptr<WebRTCStream> WebRTCStream::Create(StreamSourceType source_type, ov::String stream_name, uint32_t stream_id,
+	std::shared_ptr<WebRTCStream> WebRTCStream::Create(StreamSourceType source_type, ov::String stream_name,
 													   const std::shared_ptr<PushProvider> &provider,
 													   const std::shared_ptr<const SessionDescription> &offer_sdp,
 													   const std::shared_ptr<const SessionDescription> &peer_sdp,
 													   const std::shared_ptr<Certificate> &certificate,
 													   const std::shared_ptr<IcePort> &ice_port)
 	{
-		auto stream = std::make_shared<WebRTCStream>(source_type, stream_name, stream_id, provider, offer_sdp, peer_sdp, certificate, ice_port);
+		auto stream = std::make_shared<WebRTCStream>(source_type, stream_name, provider, offer_sdp, peer_sdp, certificate, ice_port);
 		if (stream != nullptr)
 		{
 			if (stream->Start() == false)
@@ -34,13 +34,13 @@ namespace pvd
 		return stream;
 	}
 
-	WebRTCStream::WebRTCStream(StreamSourceType source_type, ov::String stream_name, uint32_t stream_id,
+	WebRTCStream::WebRTCStream(StreamSourceType source_type, ov::String stream_name,
 							   const std::shared_ptr<PushProvider> &provider,
 							   const std::shared_ptr<const SessionDescription> &offer_sdp,
 							   const std::shared_ptr<const SessionDescription> &peer_sdp,
 							   const std::shared_ptr<Certificate> &certificate,
 							   const std::shared_ptr<IcePort> &ice_port)
-		: PushStream(source_type, stream_name, stream_id, provider), Node(NodeType::Edge)
+		: PushStream(source_type, stream_name, provider), Node(NodeType::Edge)
 	{
 		_offer_sdp = offer_sdp;
 		_peer_sdp = peer_sdp;
@@ -155,6 +155,18 @@ namespace pvd
 
 				AddTrack(audio_track);
 				_rtp_rtcp->AddRtpReceiver(ssrc, audio_track);
+
+				if (_rtp_rtcp->IsTransportCcFeedbackEnabled() == false && first_payload->IsRtcpFbEnabled(PayloadAttr::RtcpFbType::TransportCc) == true)
+				{
+					// a=extmap:id http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01
+					uint8_t transport_cc_extension_id = 0;
+					ov::String transport_cc_extension_uri;
+					if (peer_media_desc->FindExtmapItem("transport-wide-cc-extensions", transport_cc_extension_id, transport_cc_extension_uri) == true)
+					{
+						_rtp_rtcp->EnableTransportCcFeedback(transport_cc_extension_id);
+					}
+				}
+
 				_lip_sync_clock.RegisterClock(ssrc, audio_track->GetTimeBase().GetExpr());
 			}
 			else
@@ -176,6 +188,7 @@ namespace pvd
 				{
 					video_track->SetCodecId(cmn::MediaCodecId::H264);
 					video_track->SetOriginBitstream(cmn::BitstreamFormat::H264_RTP_RFC_6184);
+					_h264_extradata_nalu = first_payload->GetH264ExtraDataAsAnnexB();
 					depacketizer_type = RtpDepacketizingManager::SupportedDepacketizerType::H264;
 				}
 				else if (codec == PayloadAttr::SupportCodec::VP8)
@@ -200,6 +213,18 @@ namespace pvd
 
 				AddTrack(video_track);
 				_rtp_rtcp->AddRtpReceiver(ssrc, video_track);
+
+				if (_rtp_rtcp->IsTransportCcFeedbackEnabled() == false && first_payload->IsRtcpFbEnabled(PayloadAttr::RtcpFbType::TransportCc) == true)
+				{
+					// a=extmap:id http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01
+					uint8_t transport_cc_extension_id = 0;
+					ov::String transport_cc_extension_uri;
+					if (peer_media_desc->FindExtmapItem("transport-wide-cc-extensions", transport_cc_extension_id, transport_cc_extension_uri) == true)
+					{
+						_rtp_rtcp->EnableTransportCcFeedback(transport_cc_extension_id);
+					}
+				}
+				
 				_lip_sync_clock.RegisterClock(ssrc, video_track->GetTimeBase().GetExpr());
 			}
 		}
@@ -220,6 +245,8 @@ namespace pvd
 		ov::Node::Start();
 
 		_fir_timer.Start();
+
+		_sent_sequence_header = false;
 
 		return pvd::Stream::Start();
 	}
@@ -319,6 +346,7 @@ namespace pvd
 		std::vector<std::shared_ptr<ov::Data>> payload_list;
 		for (const auto &packet : rtp_packets)
 		{
+			logtd("%s", packet->Dump().CStr());
 			auto payload = std::make_shared<ov::Data>(packet->Payload(), packet->PayloadSize());
 			payload_list.push_back(payload);
 		}
@@ -378,14 +406,29 @@ namespace pvd
 
 		logtd("Send Frame : track_id(%d) codec_id(%d) bitstream_format(%d) packet_type(%d) data_length(%d) pts(%u)", track->GetId(), track->GetCodecId(), bitstream_format, packet_type, bitstream->GetLength(), first_rtp_packet->Timestamp());
 
+		// This may not work since almost WebRTC browser sends SRS/PPS in-band
+		if (_sent_sequence_header == false && track->GetCodecId() == cmn::MediaCodecId::H264 && _h264_extradata_nalu != nullptr)
+		{
+			auto media_packet = std::make_shared<MediaPacket>(GetMsid(),	
+																track->GetMediaType(), 
+																track->GetId(), 
+																_h264_extradata_nalu,
+																timestamp, 
+																timestamp, 
+																cmn::BitstreamFormat::H264_ANNEXB, 
+																cmn::PacketType::NALU);
+			SendFrame(media_packet);
+			_sent_sequence_header = true;
+		}
+
 		SendFrame(frame);
 
 		// Send FIR to reduce keyframe interval
-		if (_fir_timer.IsElapsed(2000) && track->GetMediaType() == cmn::MediaType::Video)
+		if (_fir_timer.IsElapsed(3000) && track->GetMediaType() == cmn::MediaType::Video)
 		{
 			_fir_timer.Update();
-			_rtp_rtcp->SendPLI(first_rtp_packet->Ssrc());
-			//_rtp_rtcp->SendFIR(_video_ssrc);
+			//_rtp_rtcp->SendPLI(first_rtp_packet->Ssrc());
+			_rtp_rtcp->SendFIR(first_rtp_packet->Ssrc());
 		}
 
 		// Send Receiver Report
@@ -403,7 +446,7 @@ namespace pvd
 	}
 
 	// ov::Node Interface
-	// RtpRtcp -> SRTP -> DTLS -> Edge(this)
+	// RtpRtcp -> SRTP -> DTLS -> Edge(this) -> IcePort
 	bool WebRTCStream::OnDataReceivedFromPrevNode(NodeType from_node, const std::shared_ptr<ov::Data> &data)
 	{
 		if (ov::Node::GetNodeState() != ov::Node::NodeState::Started)

@@ -49,7 +49,13 @@ namespace info
 		_origin_stream = stream._origin_stream;
 
 		_tracks = stream._tracks;
-		_renditions = stream._renditions;
+		_video_tracks = stream._video_tracks;
+		_audio_tracks = stream._audio_tracks;
+
+		_track_group_map = stream._track_group_map;
+
+		_playlists = stream._playlists;
+		_representation_type = stream._representation_type;
 	}
 
 	Stream::Stream(StreamSourceType source)
@@ -83,11 +89,18 @@ namespace info
 		return _id;
 	}
 
+	ov::String Stream::GetUri()
+	{
+		// #vhost name#appname/stream name
+		ov::String vhost_app_name = _app_info != nullptr ? _app_info->GetName().CStr() : "Unknown";
+		return ov::String::FormatString("%s/%s", vhost_app_name.CStr(), GetName().CStr());
+	}
+
 	void Stream::SetMsid(uint32_t msid)
 	{
 		_msid = msid;
 	}
-	
+
 	uint32_t Stream::GetMsid()
 	{
 		return _msid;
@@ -153,6 +166,16 @@ namespace info
 		return _origin_stream_uuid;
 	}
 
+	const std::chrono::system_clock::time_point &Stream::GetInputStreamCreatedTime() const
+	{
+		if (GetLinkedInputStream() != nullptr)
+		{
+			return GetLinkedInputStream()->GetCreatedTime();
+		}
+
+		return GetCreatedTime();
+	}
+
 	const std::chrono::system_clock::time_point &Stream::GetCreatedTime() const
 	{
 		return _created_time;
@@ -169,12 +192,32 @@ namespace info
 		return _source_type;
 	}
 
-	StreamRepresentationType Stream::GetRepresentationType() const {
-		return _representation_type;		
+	StreamRepresentationType Stream::GetRepresentationType() const
+	{
+		return _representation_type;
 	}
-	
-	void Stream::SetRepresentationType(const StreamRepresentationType &type) {
+
+	void Stream::SetRepresentationType(const StreamRepresentationType &type)
+	{
 		_representation_type = type;
+	}
+
+	int32_t Stream::IssueUniqueTrackId()
+	{
+		int32_t track_id = ov::Random::GenerateInt32(100, 0x7FFFFFFF);
+
+		while (true)
+		{
+			auto item = _tracks.find(track_id);
+			if (item == _tracks.end())
+			{
+				break;
+			}
+
+			track_id = ov::Random::GenerateInt32(100, 0x7FFFFFFF);
+		}
+
+		return track_id;
 	}
 
 	bool Stream::AddTrack(const std::shared_ptr<MediaTrack> &track)
@@ -187,6 +230,29 @@ namespace info
 		}
 
 		auto result = _tracks.insert(std::make_pair(track->GetId(), track)).second;
+
+		if (track->GetMediaType() == cmn::MediaType::Video)
+		{
+			_video_tracks.push_back(track);
+		}
+		else if (track->GetMediaType() == cmn::MediaType::Audio)
+		{
+			_audio_tracks.push_back(track);
+		}
+
+		// Add to group
+		auto group_it = _track_group_map.find(track->GetVariantName());
+		if (group_it == _track_group_map.end())
+		{
+			auto group = std::make_shared<MediaTrackGroup>(track->GetVariantName());
+			group->AddTrack(track);
+			_track_group_map.emplace(track->GetVariantName(), group);
+		}
+		else
+		{
+			auto group = group_it->second;
+			group->AddTrack(track);
+		}
 
 		return result;
 	}
@@ -202,12 +268,78 @@ namespace info
 		return item->second;
 	}
 
-	// Get Track by name
-	const std::shared_ptr<MediaTrack> Stream::GetTrack(const ov::String &name) const
+	const std::shared_ptr<MediaTrackGroup> Stream::GetMediaTrackGroup(const ov::String &group_name) const
+	{
+		auto item = _track_group_map.find(group_name);
+		if (item == _track_group_map.end())
+		{
+			return nullptr;
+		}
+
+		return item->second;
+	}
+
+	const std::map<ov::String, std::shared_ptr<MediaTrackGroup>> &Stream::GetMediaTrackGroups() const
+	{
+		return _track_group_map;
+	}
+
+	uint32_t Stream::GetMediaTrackCount(const cmn::MediaType &type) const
+	{
+		if (type == cmn::MediaType::Video)
+		{
+			return _video_tracks.size();
+		}
+		else if (type == cmn::MediaType::Audio)
+		{
+			return _audio_tracks.size();
+		}
+
+		return 0;
+	}
+	
+	// start from 0
+	const std::shared_ptr<MediaTrack> Stream::GetMediaTrackByOrder(const cmn::MediaType &type, uint32_t order) const
+	{
+		if (type == cmn::MediaType::Video)
+		{
+			if (order >= _video_tracks.size())
+			{
+				return nullptr;
+			}
+
+			return _video_tracks[order];
+		}
+		else if (type == cmn::MediaType::Audio)
+		{
+			if (order >= _audio_tracks.size())
+			{
+				return nullptr;
+			}
+
+			return _audio_tracks[order];
+		}
+
+		return nullptr;
+	}
+
+	// Get Track by variant name
+	const std::shared_ptr<MediaTrack> Stream::GetFirstTrackByVariant(const ov::String &variant_name) const
+	{
+		auto group = GetMediaTrackGroup(variant_name);
+		if (group == nullptr || group->GetTrackCount() == 0)
+		{
+			return nullptr;
+		}
+
+		return group->GetTrack(0);
+	}
+
+	const std::shared_ptr<MediaTrack> Stream::GetFirstTrackByType(const cmn::MediaType &type) const
 	{
 		for (auto &item : _tracks)
 		{
-			if (item.second->GetName() == name)
+			if (item.second->GetMediaType() == type)
 			{
 				return item.second;
 			}
@@ -221,15 +353,26 @@ namespace info
 		return _tracks;
 	}
 
-	bool Stream::AddRendition(const std::shared_ptr<Rendition> &rendition)
+	bool Stream::AddPlaylist(const std::shared_ptr<Playlist> &playlist)
 	{
-		_renditions.push_back(rendition);
+		_playlists.emplace(playlist->GetFileName(), playlist);
 		return true;
 	}
 
-	const std::vector<std::shared_ptr<Rendition>> &Stream::GetRenditions() const
+	std::shared_ptr<const Playlist> Stream::GetPlaylist(const ov::String &file_name) const
 	{
-		return _renditions;
+		auto item = _playlists.find(file_name);
+		if (item == _playlists.end())
+		{
+			return nullptr;
+		}
+
+		return item->second;
+	}
+
+	const std::map<ov::String, std::shared_ptr<Playlist>> &Stream::GetPlaylists() const
+	{
+		return _playlists;
 	}
 
 	const char *Stream::GetApplicationName()
@@ -263,47 +406,7 @@ namespace info
 		{
 			auto track = it->second;
 
-			switch (track->GetMediaType())
-			{
-				case MediaType::Video:
-					out_str.AppendFormat(
-						"\n\tVideo Track #%d: "
-						"Bypass(%s) "
-						"Bitrate(%s) "
-						"codec(%d, %s) "
-						"resolution(%dx%d) "
-						"framerate(%.2ffps) ",
-						track->GetId(),
-						track->IsBypass() ? "true" : "false",
-						ov::Converter::BitToString(track->GetBitrate()).CStr(),
-						track->GetCodecId(), ::StringFromMediaCodecId(track->GetCodecId()).CStr(),
-						track->GetWidth(), track->GetHeight(),
-						track->GetFrameRate());
-					break;
-
-				case MediaType::Audio:
-					out_str.AppendFormat(
-						"\n\tAudio Track #%d: "
-						"Bypass(%s) "
-						"Bitrate(%s) "
-						"codec(%d, %s) "
-						"samplerate(%s) "
-						"format(%s, %d) "
-						"channel(%s, %d) ",
-						track->GetId(),
-						track->IsBypass() ? "true" : "false",
-						ov::Converter::BitToString(track->GetBitrate()).CStr(),
-						track->GetCodecId(), ::StringFromMediaCodecId(track->GetCodecId()).CStr(),
-						ov::Converter::ToSiString(track->GetSampleRate(), 1).CStr(),
-						track->GetSample().GetName(), track->GetSample().GetSampleSize() * 8,
-						track->GetChannel().GetName(), track->GetChannel().GetCounts());
-					break;
-
-				default:
-					break;
-			}
-
-			out_str.AppendFormat("timebase(%s)", track->GetTimeBase().ToString().CStr());
+			out_str.AppendFormat("\n\t%s", track->GetInfoString().CStr());
 		}
 
 		return out_str;

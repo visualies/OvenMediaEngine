@@ -119,6 +119,27 @@ public:
 };
 
 template<typename T>
+class ByteReader<T, 3, false>
+{
+public:
+	static T ReadBigEndian(const uint8_t *data)
+	{
+		return (Get(data, 0) << 16) | (Get(data, 1) << 8) | (Get(data, 2));
+	}
+
+	static T ReadLittleEndian(const uint8_t *data)
+	{
+		return Get(data, 0) | (Get(data, 1) << 8) | (Get(data, 2) << 16);
+	}
+
+private:
+	inline static T Get(const uint8_t *data, unsigned int index)
+	{
+		return static_cast<T>(data[index]);
+	}
+};
+
+template<typename T>
 class ByteReader<T, 4, false>
 {
 public:
@@ -138,6 +159,26 @@ private:
 		return static_cast<T>(data[index]);
 	}
 };
+
+template<typename T>
+class ByteWriter<T, 3, false>
+{
+public:
+	static void WriteBigEndian(uint8_t *data, T val)
+	{
+		data[0] = val >> 16;
+		data[1] = val >> 8;
+		data[2] = val;
+	}
+
+	static void WriteLittleEndian(uint8_t *data, T val)
+	{
+		data[0] = val;
+		data[1] = val >> 8;
+		data[2] = val >> 16;
+	}
+};
+
 
 template<typename T>
 class ByteWriter<T, 4, false>

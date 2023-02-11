@@ -416,8 +416,12 @@ namespace ov
 		DispatchResult WaitForHalfClose();
 
 		// CloseInternal() doesn't call the _callback directly
-		// So, we need to call DispatchEvents() after calling this api to do connection callback
-		virtual bool CloseInternal();
+		// So, we need to call CallCloseCallbackIfNeeded() after calling this api to do connection callback
+		virtual bool CloseInternal(SocketState close_reason);
+
+		// Since the resource is usually cleaned inside the OnClosed() callback,
+		// callback is performed outside the lock_guard to prevent acquiring the lock.
+		void CallCloseCallbackIfNeeded();
 
 	protected:
 		std::shared_ptr<const SocketError> DoConnectionCallback(const std::shared_ptr<const SocketError> &error);
@@ -490,6 +494,7 @@ namespace ov
 
 		// A temporary variable used to send callback without mutex lock
 		std::shared_ptr<SocketAsyncInterface> _post_callback;
+		SocketState _close_reason = SocketState::Closed;
 
 		volatile bool _force_stop = false;
 

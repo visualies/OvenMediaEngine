@@ -21,10 +21,11 @@ namespace bmff
 	public:
 		struct Config
 		{
-			uint32_t chunk_duration_ms = 1000;
+			double chunk_duration_ms = 500.0;
+			double segment_duration_ms = 6000.0;
 		};
 
-		FMP4Packager(const std::shared_ptr<FMP4Storage> &storage, const std::shared_ptr<const MediaTrack> &track, const Config &config);
+		FMP4Packager(const std::shared_ptr<FMP4Storage> &storage, const std::shared_ptr<const MediaTrack> &media_track, const std::shared_ptr<const MediaTrack> &data_track, const Config &config);
 
 		// Generate Initialization FMP4Segment
 		bool CreateInitializationSegment();
@@ -32,11 +33,16 @@ namespace bmff
 		// Generate Media FMP4Segment
 		bool AppendSample(const std::shared_ptr<const MediaPacket> &media_packet);
 
+		// Reserve Data Packet
+		// If the data frame is within the time interval of the fragment, it is added.
+		bool ReserveDataPacket(const std::shared_ptr<const MediaPacket> &media_packet);
+
 	private:
 		const Config &GetConfig() const;
 
+		std::shared_ptr<bmff::Packager::Samples> GetDataSamples(int64_t start_timestamp, int64_t end_timestamp);
+
 		bool StoreInitializationSection(const std::shared_ptr<ov::Data> &segment);
-		bool AppendMediaChunk(const std::shared_ptr<ov::Data> &chunk, uint64_t start_timestamp, uint32_t duration_ms, bool independent);
 
 		std::shared_ptr<const MediaPacket> ConvertBitstreamFormat(const std::shared_ptr<const MediaPacket> &media_packet);
 
@@ -46,5 +52,8 @@ namespace bmff
 		std::shared_ptr<FMP4Storage> _storage = nullptr;
 		std::shared_ptr<Samples> _samples_buffer = nullptr;
 
+		double _target_chunk_duration_ms = 0.0;
+
+		std::queue<std::shared_ptr<const MediaPacket>> _reserved_data_packets;
 	};
 }

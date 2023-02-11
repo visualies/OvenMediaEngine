@@ -16,12 +16,16 @@
 class LLHlsSession : public pub::Session
 {
 public:
-	static std::shared_ptr<LLHlsSession> Create(session_id_t session_id, const ov::String &session_key, 
+	static std::shared_ptr<LLHlsSession> Create(session_id_t session_id, 
+												const bool &origin_mode,
+												const ov::String &session_key, 
 												const std::shared_ptr<pub::Application> &application,
 												const std::shared_ptr<pub::Stream> &stream,
 												uint64_t session_life_time);
 
-	LLHlsSession(const info::Session &session_info, const ov::String &session_key,
+	LLHlsSession(const info::Session &session_info, 
+				const bool &origin_mode,
+				const ov::String &session_key,
 				const std::shared_ptr<pub::Application> &application, 
 				const std::shared_ptr<pub::Stream> &stream,
 				uint64_t session_life_time);
@@ -59,11 +63,11 @@ private:
 
 	bool ParseFileName(const ov::String &file_name, RequestType &type, int32_t &track_id, int64_t &segment_number, int64_t &partial_number, ov::String &stream_key) const;
 
-	void ResponsePlaylist(const std::shared_ptr<http::svr::HttpExchange> &exchange);
-	void ResponseChunklist(const std::shared_ptr<http::svr::HttpExchange> &exchange, const int32_t &track_id, int64_t msn, int64_t part, bool skip);
-	void ResponseInitializationSegment(const std::shared_ptr<http::svr::HttpExchange> &exchange, const int32_t &track_id);
-	void ResponseSegment(const std::shared_ptr<http::svr::HttpExchange> &exchange, const int32_t &track_id, const int64_t &segment_number);
-	void ResponsePartialSegment(const std::shared_ptr<http::svr::HttpExchange> &exchange, const int32_t &track_id, const int64_t &segment_number, const int64_t &partial_number);
+	void ResponsePlaylist(const std::shared_ptr<http::svr::HttpExchange> &exchange, const ov::String &file_name, bool legacy);
+	void ResponseChunklist(const std::shared_ptr<http::svr::HttpExchange> &exchange, const ov::String &file_name, const int32_t &track_id, int64_t msn, int64_t part, bool skip, bool legacy);
+	void ResponseInitializationSegment(const std::shared_ptr<http::svr::HttpExchange> &exchange, const ov::String &file_name, const int32_t &track_id);
+	void ResponseSegment(const std::shared_ptr<http::svr::HttpExchange> &exchange, const ov::String &file_name, const int32_t &track_id, const int64_t &segment_number);
+	void ResponsePartialSegment(const std::shared_ptr<http::svr::HttpExchange> &exchange, const ov::String &file_name, const int32_t &track_id, const int64_t &segment_number, const int64_t &partial_number);
 
 	void ResponseData(const std::shared_ptr<http::svr::HttpExchange> &exchange);
 
@@ -73,15 +77,17 @@ private:
 	struct PendingRequest
 	{
 		RequestType type;
+		ov::String file_name;
 		int32_t track_id;
 		int64_t segment_number = -1;
 		int64_t partial_number = -1;
 		bool skip = false;
+		bool legacy = false;
 
 		std::shared_ptr<http::svr::HttpExchange> exchange;
 	};
 
-	bool AddPendingRequest(const std::shared_ptr<http::svr::HttpExchange> &exchange, const RequestType &type, const int32_t &track_id, const int64_t &segment_number, const int64_t &partial_number, const bool &skip = false);
+	bool AddPendingRequest(const std::shared_ptr<http::svr::HttpExchange> &exchange, const RequestType &type, const ov::String &file_name, const int32_t &track_id, const int64_t &segment_number, const int64_t &partial_number, const bool &skip, const bool &legacy);
 
 	// Session runs on a single thread, so it doesn't need mutex
 	std::list<PendingRequest> _pending_requests;
@@ -95,4 +101,12 @@ private:
 	uint32_t _number_of_players = 0;
 
 	ov::String _session_key;
+
+	int _master_playlist_max_age = 0;
+	int _chunklist_max_age = 0;
+	int _chunklist_with_directives_max_age = 60;
+	int _segment_max_age = -1;
+	int _partial_segment_max_age = -1;
+
+	bool _origin_mode = false;
 };

@@ -30,9 +30,23 @@ namespace http
 			_keep_alive = exchange->_keep_alive;
 		}
 
+		HttpExchange::~HttpExchange()
+		{
+		}
+
 		// Terminate
 		void HttpExchange::Release()
 		{
+			// print debug info
+			if ((static_cast<int>(GetResponse()->GetStatusCode()) / 100) != 2)
+			{
+				logte("%s", GetDebugInfo().CStr());
+			}
+			else
+			{
+				logtd("%s", GetDebugInfo().CStr());
+			}
+
 			_status = Status::Completed;
 			_connection->OnExchangeCompleted(GetSharedPtr());
 		}
@@ -40,6 +54,23 @@ namespace http
 		ov::String HttpExchange::ToString() const
 		{
 			return GetConnection()->ToString();
+		}
+
+		ov::String HttpExchange::GetDebugInfo() const
+		{
+			auto request = GetRequest();
+			auto response = GetResponse();
+
+			// Get duration with reqeust->GetCreateTime and response->GetResponseTime
+			auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(response->GetResponseTime() - request->GetCreateTime()).count();
+
+			return ov::String::FormatString("\n[Client] %s [Duration] %llu \n"
+				"[Request] URL(%s) Method(%s) Version(%s) Request Time(%s)\n"
+				"[Response] Status(%d) Sent Size(%d) Response Time(%s)\n",
+
+				ToString().CStr(), duration,
+				request->GetUri().CStr(), http::StringFromMethod(request->GetMethod()).CStr(), request->GetHttpVersion().CStr(), ov::Converter::ToISO8601String(request->GetCreateTime()).CStr(),
+				response->GetStatusCode(), response->GetSentSize(), ov::Converter::ToISO8601String(response->GetResponseTime()).CStr());
 		}
 
 		void HttpExchange::SetKeepAlive(bool keep_alive)
@@ -198,8 +229,9 @@ namespace http
 			{
 				logtd("Interceptor is nullptr");
 				SetStatus(Status::Error);
-				GetResponse()->SetStatusCode(StatusCode::InternalServerError);
+				GetResponse()->SetStatusCode(StatusCode::NotFound);
 				GetResponse()->Response();
+				Release();
 				return false;
 			}
 
@@ -214,8 +246,9 @@ namespace http
 			{
 				logtd("Interceptor is nullptr");
 				SetStatus(Status::Error);
-				GetResponse()->SetStatusCode(StatusCode::InternalServerError);
+				GetResponse()->SetStatusCode(StatusCode::NotFound);
 				GetResponse()->Response();
+				Release();
 				return false;
 			}
 
@@ -229,8 +262,9 @@ namespace http
 			{
 				logtd("Interceptor is nullptr");
 				SetStatus(Status::Error);
-				GetResponse()->SetStatusCode(StatusCode::InternalServerError);
+				GetResponse()->SetStatusCode(StatusCode::NotFound);
 				GetResponse()->Response();
+				Release();
 				return InterceptorResult::Error;
 			}
 

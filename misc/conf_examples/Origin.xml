@@ -12,7 +12,7 @@
 	This is useful when OME cannot obtain a public IP from an interface, such as AWS or docker environment. 
 	If this is successful, you can use ${PublicIP} in your settings.
 	-->
-	<StunServer>stun.l.google.com:19302</StunServer>
+	<StunServer>stun.ovenmediaengine.com:13478</StunServer>
 
 	<Modules>
 		<!-- 
@@ -161,6 +161,19 @@
 			</SignedPolicy>
 			-->
 
+			<!--
+			<OriginMapStore>
+				In order to use OriginMap, you must enable OVT Publisher in Origin and OVT Provider in Edge.
+				<RedisServer>
+					<Host>192.168.0.160:6379</Host>
+					<Auth>!@#ovenmediaengine</Auth>
+				</RedisServer>
+				
+				This is only needed for the origin server and used to register the ovt address of the stream. 
+				<OriginHostName>ome-dev.airensoft.com</OriginHostName>
+			</OriginMapStore>
+			-->
+
 			<!-- Settings for applications -->
 			<Applications>
 				<Application>
@@ -173,25 +186,47 @@
 							<OutputStreamName>${OriginStreamName}</OutputStreamName>
 
 							<!-- 
-							You can provide ABR with Renditions. Currently, ABR is only supported in LLHLS.
+							You can provide ABR with Playlist. Currently, ABR is only supported in LLHLS.
 							
-							<Renditions>
+							<Playlist>
+								<Name>Paid</Name>
+								You can play this playlist with 
+								LLHLS : http[s]://<domain>[:port]/<app>/<stream>/<FileName>.m3u8 
+								WebRTC : ws[s]://<domain>[:port]/<app>/<stream>/<FileName>
+								Note that the keywords "playlist" and "chunklist" MUST NOT be included in FileName.
+								<FileName>premium</FileName>
+
+								Options is optional. 
+								<Options>
+									WebRtcAutoAbr : Default value is true
+									<WebRtcAutoAbr>true</WebRtcAutoAbr> 
+								</Options>
+
 								<Rendition>
-									<Name>Bypass</Name>
+									<Name>bypass</Name>
 									<Video>bypass_video</Video>
 									<Audio>bypass_audio</Audio>
 								</Rendition>
 								<Rendition>
-									<Name>FHD</Name>
-									<Video>video_1280</Video>
+									<Name>480p</Name>
+									<Video>480p</Video>
 									<Audio>bypass_audio</Audio>
 								</Rendition>
 								<Rendition>
-									<Name>HD</Name>
-									<Video>video_720</Video>
+									<Name>720p</Name>
+									<Video>720p</Video>
 									<Audio>bypass_audio</Audio>
 								</Rendition>
-							</Renditions> 
+							</Playlist>
+							<Playlist>
+								<Name>free</Name>
+								<FileName>free</FileName>
+								<Rendition>
+									<Name>720p</Name>
+									<Video>720p</Video>
+									<Audio>bypass_audio</Audio>
+								</Rendition>
+							</Playlist>
 							-->
 
 							<Encodes>
@@ -270,7 +305,19 @@
 							<JitterBuffer>false</JitterBuffer>
 						</WebRTC>
 						<LLHLS>
+							<OriginMode>true</OriginMode>
+							<!--
+							<CacheControl>
+								<MasterPlaylistMaxAge>0</MasterPlaylistMaxAge>
+								<ChunklistMaxAge>0</ChunklistMaxAge>
+								<ChunklistWithDirectivesMaxAge>60</ChunklistWithDirectivesMaxAge>
+								<SegmentMaxAge>-1</SegmentMaxAge>
+								<PartialSegmentMaxAge>-1</PartialSegmentMaxAge>
+							</CacheControl>
+							-->
 							<ChunkDuration>0.5</ChunkDuration>
+							<!-- PartHoldBack SHOULD be at least three times the Part Target Duration -->
+							<PartHoldBack>1.5</PartHoldBack>
 							<SegmentDuration>6</SegmentDuration>
 							<SegmentCount>10</SegmentCount>
 							<CrossDomains>

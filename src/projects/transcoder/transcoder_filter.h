@@ -20,31 +20,45 @@ enum class TranscodeFilterType : int8_t
 class TranscodeFilter
 {
 public:
+	typedef std::function<void(int32_t, std::shared_ptr<MediaFrame>)> CompleteHandler;
+
+public:
 	TranscodeFilter();
-	TranscodeFilter(std::shared_ptr<MediaTrack> input_media_track, std::shared_ptr<TranscodeContext> input_context, std::shared_ptr<TranscodeContext> output_context);
+
 	~TranscodeFilter();
 
-	bool Configure(std::shared_ptr<MediaTrack> input_media_track, std::shared_ptr<TranscodeContext> input_context, std::shared_ptr<TranscodeContext> output_context);
+	bool Configure(int32_t filter_id, std::shared_ptr<MediaTrack> input_track, std::shared_ptr<MediaTrack> output_track, CompleteHandler complete_handler);
 
 	bool SendBuffer(std::shared_ptr<MediaFrame> buffer);
-	std::shared_ptr<MediaFrame> RecvBuffer(TranscodeResult *result);
 
-	uint32_t GetInputBufferSize();
-	uint32_t GetOutputBufferSize();
-
+	void Stop(); 
 	cmn::Timebase GetInputTimebase() const;
 	cmn::Timebase GetOutputTimebase() const;
 
 	int64_t _last_pts = -1LL;
 	int64_t _threshold_ts_increment = 0LL;
 
-	std::shared_ptr<MediaTrack> _input_media_track;
-	std::shared_ptr<TranscodeContext> _input_context;
-	std::shared_ptr<TranscodeContext> _output_context;
+	std::shared_ptr<MediaTrack> _input_track;
+	std::shared_ptr<MediaTrack> _output_track;
+
+	void SetAlias(ov::String alias);
+
+	void SetCompleteHandler(CompleteHandler func)
+	{
+		_complete_handler = move(func);
+	}
+
+	void OnComplete(std::shared_ptr<MediaFrame> frame);
 
 private:
 	bool CreateFilter();
 	bool IsNeedUpdate(std::shared_ptr<MediaFrame> buffer);
 
-	MediaFilterImpl *_impl;
+	int32_t _filter_id;
+
+	FilterBase *_impl;
+
+	ov::String _alias;
+
+	CompleteHandler _complete_handler;
 };

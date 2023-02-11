@@ -173,45 +173,6 @@ bool WebRtcPublisher::Start()
 
 	_message_thread.Start(ov::MessageThreadObserver<std::shared_ptr<ov::CommonMessage>>::GetSharedPtr());
 
-	// Deprecated by Getroot 210830
-	// _timer.Push(
-	// 	[this](void *parameter) -> ov::DelayQueueAction 
-	// 	{
-	// 		// 2018-12-24 23:06:25.035,RTSP.SS,CONN_COUNT,INFO,,,[Live users], [Playback users]
-	// 		std::shared_ptr<info::Application> rtsp_live_app_info;
-	// 		std::shared_ptr<mon::ApplicationMetrics> rtsp_live_app_metrics;
-	// 		std::shared_ptr<info::Application> rtsp_play_app_info;
-	// 		std::shared_ptr<mon::ApplicationMetrics> rtsp_play_app_metrics;
-
-	// 		rtsp_live_app_metrics = nullptr;
-	// 		rtsp_play_app_metrics = nullptr;
-			
-	// 		// This log only for the "default" host and the "rtsp_live"/"rtsp_playback" applications 
-	// 		rtsp_live_app_info = std::static_pointer_cast<info::Application>(GetApplicationByName(ocst::Orchestrator::GetInstance()->ResolveApplicationName("default", "rtsp_live")));
-	// 		if (rtsp_live_app_info != nullptr)
-	// 		{
-	// 			rtsp_live_app_metrics = ApplicationMetrics(*rtsp_live_app_info);
-	// 		}
-	// 		rtsp_play_app_info = std::static_pointer_cast<info::Application>(GetApplicationByName(ocst::Orchestrator::GetInstance()->ResolveApplicationName("default", "rtsp_playback")));
-	// 		if (rtsp_play_app_info != nullptr)
-	// 		{
-	// 			rtsp_play_app_metrics = ApplicationMetrics(*rtsp_play_app_info);
-	// 		}
-
-	// 		stat_log(STAT_LOG_WEBRTC_EDGE_VIEWERS, "%s,%s,%s,%s,,,%u,%u",
-	// 				ov::Clock::Now().CStr(),
-	// 				"WEBRTC.SS",
-	// 				"CONN_COUNT",
-	// 				"INFO",
-	// 				rtsp_live_app_metrics != nullptr ? rtsp_live_app_metrics->GetTotalConnections() : 0,
-	// 				rtsp_play_app_metrics != nullptr ? rtsp_play_app_metrics->GetTotalConnections() : 0);
-
-	// 		return ov::DelayQueueAction::Repeat;
-	// 	}
-	// 	, 1000);
-
-	// _timer.Start();
-
 	return Publisher::Start();
 }
 
@@ -250,48 +211,6 @@ bool WebRtcPublisher::DisconnectSessionInternal(const std::shared_ptr<RtcSession
 	MonitorInstance->OnSessionDisconnected(*stream, PublisherType::Webrtc);
 
 	session->Stop();
-
-	// Special purpose log
-	stat_log(STAT_LOG_WEBRTC_EDGE_SESSION, "%s,%s,%s,%s,,,%s,%s,%u",
-					ov::Clock::Now().CStr(),
-					"WEBRTC.SS",
-					"SESSION",
-					"INFO",
-					"deleteClientSession",
-					stream->GetName().CStr(),
-					session->GetId());
-
-	std::shared_ptr<info::Application> rtsp_live_app_info;
-	std::shared_ptr<mon::ApplicationMetrics> rtsp_live_app_metrics;
-	std::shared_ptr<info::Application> rtsp_play_app_info;
-	std::shared_ptr<mon::ApplicationMetrics> rtsp_play_app_metrics;
-
-	rtsp_live_app_metrics = nullptr;
-	rtsp_play_app_metrics = nullptr;
-
-	// This log only for the "default" host and the "rtsp_live"/"rtsp_playback" applications 
-	rtsp_live_app_info = std::static_pointer_cast<info::Application>(GetApplicationByName(ocst::Orchestrator::GetInstance()->ResolveApplicationName("default", "rtsp_live")));
-	if (rtsp_live_app_info != nullptr)
-	{
-		rtsp_live_app_metrics = ApplicationMetrics(*rtsp_live_app_info);
-	}
-	rtsp_play_app_info = std::static_pointer_cast<info::Application>(GetApplicationByName(ocst::Orchestrator::GetInstance()->ResolveApplicationName("default", "rtsp_playback")));
-	if (rtsp_play_app_info != nullptr)
-	{
-		rtsp_play_app_metrics = ApplicationMetrics(*rtsp_play_app_info);
-	}
-
-	stat_log(STAT_LOG_WEBRTC_EDGE_SESSION, "%s,%s,%s,%s,,,%s:%d,%s:%d,%s,%u",
-				ov::Clock::Now().CStr(),
-				"WEBRTC.SS",
-				"SESSION",
-				"INFO",
-				"Live",
-				rtsp_live_app_metrics != nullptr ? rtsp_live_app_metrics->GetTotalConnections() : 0,
-				"Playback",
-				rtsp_play_app_metrics != nullptr ? rtsp_play_app_metrics->GetTotalConnections() : 0,
-				stream->GetName().CStr(),
-				session->GetId());
 
 	return true;
 }
@@ -378,6 +297,8 @@ std::shared_ptr<const SessionDescription> WebRtcPublisher::OnRequestOffer(const 
 		return nullptr;
 	}
 
+	ov::String final_file_name = parsed_url->File();
+
 	// PORT can be omitted if port is default port, but SignedPolicy requires this information.
 	if(parsed_url->Port() == 0)
 	{
@@ -450,6 +371,7 @@ std::shared_ptr<const SessionDescription> WebRtcPublisher::OnRequestOffer(const 
 			final_vhost_app_name = ocst::Orchestrator::GetInstance()->ResolveApplicationNameFromDomain(parsed_url->Host(), parsed_url->App());
 			final_host_name = parsed_url->Host();
 			final_stream_name = parsed_url->Stream();
+			final_file_name = parsed_url->File();
 		}
 	}
 	else if(webhooks_result == AccessController::VerificationResult::Error)
@@ -473,17 +395,6 @@ std::shared_ptr<const SessionDescription> WebRtcPublisher::OnRequestOffer(const 
 		}
 		else
 		{
-			// Connection Request log
-			// 2019-11-06 09:46:45.390 , RTSP.SS ,REQUEST,INFO,,,Live,rtsp://50.1.111.154:10915/1135/1/,220.103.225.254_44757_1573001205_389304_128855562
-			stat_log(STAT_LOG_WEBRTC_EDGE_REQUEST, "%s,%s,%s,%s,,,%s,%s,%s",
-						ov::Clock::Now().CStr(),
-						"WEBRTC.SS",
-						"REQUEST",
-						"INFO",
-						final_vhost_app_name.CStr(),
-						stream->GetMediaSource().CStr(),
-						remote_address->ToString(false).CStr());
-
 			logti("URL %s is requested", stream->GetMediaSource().CStr());
 		}
 	}
@@ -504,6 +415,13 @@ std::shared_ptr<const SessionDescription> WebRtcPublisher::OnRequestOffer(const 
 		return nullptr;
 	}
 
+	auto file_sdp = stream->GetSessionDescription(final_file_name);
+	if(file_sdp == nullptr)
+	{
+		logte("Cannot find file (%s/%s/%s)", final_vhost_app_name.CStr(), final_stream_name.CStr(), final_file_name.CStr());
+		return nullptr;
+	}
+
 	auto transport = parsed_url->GetQueryValue("transport");
 	if(transport.UpperCaseString() == "TCP")
 	{
@@ -518,7 +436,8 @@ std::shared_ptr<const SessionDescription> WebRtcPublisher::OnRequestOffer(const 
 		ice_candidates->insert(ice_candidates->end(), candidates.cbegin(), candidates.cend());
 	}
 
-	auto session_description = std::make_shared<SessionDescription>(*stream->GetSessionDescription());
+	// Copy SDP
+	auto session_description = std::make_shared<SessionDescription>(*file_sdp);
 	session_description->SetOrigin("OvenMediaEngine", ov::Unique::GenerateUint32(), 2, "IN", 4, "127.0.0.1");
 	session_description->SetIceUfrag(_ice_port->GenerateUfrag());
 	session_description->Update();
@@ -577,6 +496,7 @@ bool WebRtcPublisher::OnAddRemoteDescription(const std::shared_ptr<http::svr::ws
 
 	auto final_vhost_app_name = ocst::Orchestrator::GetInstance()->ResolveApplicationNameFromDomain(parsed_url->Host(), parsed_url->App());
 	auto final_stream_name = parsed_url->Stream();
+	auto final_file_name = parsed_url->File();
 
 	// SignedPolicy and SignedToken
 	auto request = ws_session->GetRequest();
@@ -586,14 +506,14 @@ bool WebRtcPublisher::OnAddRemoteDescription(const std::shared_ptr<http::svr::ws
 	logtd("OnAddRemoteDescription: %s", remote_sdp_text.CStr());
 
 	auto application = GetApplicationByName(final_vhost_app_name);
-	auto stream = GetStream(final_vhost_app_name, final_stream_name);
+	auto stream = std::static_pointer_cast<RtcStream>(GetStream(final_vhost_app_name, final_stream_name));
 	if (!stream)
 	{
 		logte("Cannot find stream (%s/%s)", final_vhost_app_name.CStr(), final_stream_name.CStr());
 		return false;
 	}
 
-	auto session = RtcSession::Create(Publisher::GetSharedPtrAs<WebRtcPublisher>(), application, stream, offer_sdp, peer_sdp, _ice_port, ws_session);
+	auto session = RtcSession::Create(Publisher::GetSharedPtrAs<WebRtcPublisher>(), application, stream, final_file_name, offer_sdp, peer_sdp, _ice_port, ws_session);
 	if (session != nullptr)
 	{
 		stream->AddSession(session);
@@ -601,54 +521,76 @@ bool WebRtcPublisher::OnAddRemoteDescription(const std::shared_ptr<http::svr::ws
 
 		auto ice_timeout = application->GetConfig().GetPublishers().GetWebrtcPublisher().GetTimeout();
 		_ice_port->AddSession(IcePortObserver::GetSharedPtr(), session->GetId(), offer_sdp, peer_sdp, ice_timeout, session_life_time, session);
-
-		// Session is created
-
-		// Special purpose log
-		stat_log(STAT_LOG_WEBRTC_EDGE_SESSION, "%s,%s,%s,%s,,,%s,%s,%u",
-					 ov::Clock::Now().CStr(),
-					 "WEBRTC.SS",
-					 "SESSION",
-					 "INFO",
-					 "createClientSession",
-					 stream->GetName().CStr(),
-					 session->GetId());
-
-		std::shared_ptr<info::Application> rtsp_live_app_info;
-		std::shared_ptr<mon::ApplicationMetrics> rtsp_live_app_metrics;
-		std::shared_ptr<info::Application> rtsp_play_app_info;
-		std::shared_ptr<mon::ApplicationMetrics> rtsp_play_app_metrics;
-
-		rtsp_live_app_metrics = nullptr;
-		rtsp_play_app_metrics = nullptr;
-
-		// This log only for the "default" host and the "rtsp_live"/"rtsp_playback" applications 
-		rtsp_live_app_info = std::static_pointer_cast<info::Application>(GetApplicationByName(ocst::Orchestrator::GetInstance()->ResolveApplicationName("default", "rtsp_live")));
-		if (rtsp_live_app_info != nullptr)
-		{
-			rtsp_live_app_metrics = ApplicationMetrics(*rtsp_live_app_info);
-		}
-		rtsp_play_app_info = std::static_pointer_cast<info::Application>(GetApplicationByName(ocst::Orchestrator::GetInstance()->ResolveApplicationName("default", "rtsp_playback")));
-		if (rtsp_play_app_info != nullptr)
-		{
-			rtsp_play_app_metrics = ApplicationMetrics(*rtsp_play_app_info);
-		}
-
-		stat_log(STAT_LOG_WEBRTC_EDGE_SESSION, "%s,%s,%s,%s,,,%s:%d,%s:%d,%s,%u",
-					ov::Clock::Now().CStr(),
-					"WEBRTC.SS",
-					"SESSION",
-					"INFO",
-					"Live",
-					rtsp_live_app_metrics != nullptr ? rtsp_live_app_metrics->GetTotalConnections() : 0,
-					"Playback",
-					rtsp_play_app_metrics != nullptr ? rtsp_play_app_metrics->GetTotalConnections() : 0,
-					stream->GetName().CStr(),
-					session->GetId());
 	}
 	else
 	{
-		logte("Cannot create session");
+		logte("Cannot create session for (%s/%s/%s)", final_vhost_app_name.CStr(), final_stream_name.CStr(), final_file_name.CStr());
+		return false;
+	}
+
+	return true;
+}
+
+bool WebRtcPublisher::OnChangeRendition(const std::shared_ptr<http::svr::ws::WebSocketSession> &ws_session,
+								   bool change_rendition, const ov::String &rendition_name, bool change_auto, bool &auto_abr,
+								   const std::shared_ptr<const SessionDescription> &offer_sdp,
+									const std::shared_ptr<const SessionDescription> &peer_sdp)
+{
+	auto [autorized_exist, authorized] = ws_session->GetUserData("authorized");
+	ov::String uri;
+	if(autorized_exist == true && std::holds_alternative<bool>(authorized) == true && std::get<bool>(authorized) == true)
+	{
+		auto [new_url_exist, new_url] = ws_session->GetUserData("new_url");
+		if(new_url_exist == true && std::holds_alternative<ov::String>(new_url) == true)
+		{
+			uri = std::get<ov::String>(new_url);
+		}
+		else
+		{
+			return false;
+		}
+	}
+	else
+	{
+		// This client was unauthoized when request offer situation
+		return false;
+	}
+
+	auto parsed_url = ov::Url::Parse(uri);
+	if (parsed_url == nullptr)
+	{
+		logte("Could not parse the url: %s", uri.CStr());
+		return false;
+	}
+
+	auto final_vhost_app_name = ocst::Orchestrator::GetInstance()->ResolveApplicationNameFromDomain(parsed_url->Host(), parsed_url->App());
+	auto final_stream_name = parsed_url->Stream();
+
+	logtd("ChangeRendition command received : %s/%s/%u", final_vhost_app_name.CStr(), final_stream_name.CStr(), offer_sdp->GetSessionId());
+
+	// Find Stream
+	auto stream = std::static_pointer_cast<RtcStream>(GetStream(final_vhost_app_name, final_stream_name));
+	if (!stream)
+	{
+		logte("To change rendition in session(%u) failed. Cannot find stream (%s/%s)", offer_sdp->GetSessionId(), final_vhost_app_name.CStr(), final_stream_name.CStr());
+		return false;
+	}
+
+	auto session = std::static_pointer_cast<RtcSession>(stream->GetSession(offer_sdp->GetSessionId()));
+	if (session == nullptr)
+	{
+		logte("To change rendition in session(%d) failed. Cannot find session by offer sdp session id", offer_sdp->GetSessionId());
+		return false;
+	}
+
+	if (change_auto == true)
+	{
+		session->SetAutoAbr(auto_abr);
+	}
+
+	if (change_rendition == true)
+	{
+		session->RequestChangeRendition(rendition_name);
 	}
 
 	return true;
@@ -701,7 +643,7 @@ bool WebRtcPublisher::OnStopCommand(const std::shared_ptr<http::svr::ws::WebSock
 	auto session = std::static_pointer_cast<RtcSession>(stream->GetSession(offer_sdp->GetSessionId()));
 	if (session == nullptr)
 	{
-		logte("To stop session failed. Cannot find session by peer sdp session id (%u)", offer_sdp->GetSessionId());
+		logte("To stop session failed. Cannot find session by offer sdp session id (%u)", offer_sdp->GetSessionId());
 		return false;
 	}
 

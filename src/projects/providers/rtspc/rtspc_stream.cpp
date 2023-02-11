@@ -21,7 +21,8 @@ namespace pvd
 {
 	std::shared_ptr<RtspcStream> RtspcStream::Create(const std::shared_ptr<pvd::PullApplication> &application,
 													 const uint32_t stream_id, const ov::String &stream_name,
-													 const std::vector<ov::String> &url_list, std::shared_ptr<pvd::PullStreamProperties> properties)
+													 const std::vector<ov::String> &url_list, 
+													 const std::shared_ptr<pvd::PullStreamProperties> &properties)
 	{
 		info::Stream stream_info(*std::static_pointer_cast<info::Application>(application), StreamSourceType::RtspPull);
 
@@ -39,7 +40,7 @@ namespace pvd
 		return stream;
 	}
 
-	RtspcStream::RtspcStream(const std::shared_ptr<pvd::PullApplication> &application, const info::Stream &stream_info, const std::vector<ov::String> &url_list, std::shared_ptr<pvd::PullStreamProperties> properties)
+	RtspcStream::RtspcStream(const std::shared_ptr<pvd::PullApplication> &application, const info::Stream &stream_info, const std::vector<ov::String> &url_list, const std::shared_ptr<pvd::PullStreamProperties> &properties)
 	: pvd::PullStream(application, stream_info, url_list, properties), Node(NodeType::Rtsp)
 	{
 		SetState(State::IDLE);
@@ -375,6 +376,12 @@ namespace pvd
 		auto media_desc_list = _sdp.GetMediaList();
 		for (const auto &media_desc : media_desc_list)
 		{
+			if (media_desc->GetMediaType() == MediaDescription::MediaType::Application || media_desc->GetMediaType() == MediaDescription::MediaType::Unknown)
+			{
+				logtw("Ignored not supported media type : %s", media_desc->GetMediaTypeStr().CStr());
+				continue;
+			}
+
 			auto control = media_desc->GetControl();
 			if(control.IsEmpty())
 			{
@@ -514,7 +521,7 @@ namespace pvd
 
 				default:
 					logte("%s - Unsupported codec  : %s", GetName().CStr(), first_payload->GetCodecParams().CStr());
-					return false;
+					continue;
 			}
 
 			// Add Depacketizer
@@ -995,7 +1002,7 @@ namespace pvd
 				return;
 			}
 
-			timestamp = AdjustTimestampByBase(channel, pts.value(), std::numeric_limits<uint64_t>::max());
+			timestamp = AdjustTimestampByBase(channel, pts.value(), pts.value(), std::numeric_limits<uint64_t>::max());
 		}
 		else if(_pts_calculation_method == PtsCalculationMethod::SINGLE_DELTA)
 		{

@@ -32,6 +32,29 @@ namespace http
 			return _user_data;
 		}
 
+		void HttpConnection::AddUserData(const ov::String &key, std::any user_data)
+		{
+			_user_data_map[key] = user_data;
+		}
+
+		std::any HttpConnection::GetUserData(const ov::String &key) const
+		{
+			auto item = _user_data_map.find(key);
+
+			if (item == _user_data_map.end())
+			{
+				return std::any();
+			}
+
+			return item->second;
+		}
+
+		// Get user datas
+		std::map<ov::String, std::any> HttpConnection::GetUserDataMap() const
+		{
+			return _user_data_map;
+		}
+
 		// To string
 		ov::String HttpConnection::ToString() const
 		{
@@ -232,12 +255,16 @@ namespace http
 				_websocket_session.reset();
 			}
 			
+			std::unique_lock<std::mutex> map_guard(_http_stream_map_guard);
 			_http_stream_map.clear();
+			map_guard.unlock();
 
 			if (reason != PhysicalPortDisconnectReason::Disconnected)
 			{
 				_client_socket->Close();
 			}
+
+			_user_data_map.clear();
 
 			_closed = true;
 		}
@@ -245,6 +272,10 @@ namespace http
 		void HttpConnection::OnDataReceived(const std::shared_ptr<const ov::Data> &data)
 		{
 			std::lock_guard<std::recursive_mutex> lock(_close_mutex);
+			if (_closed == true)
+			{
+				return;
+			}
 
 			auto process_data = data->Clone();
 			while (process_data->GetLength() > 0)
@@ -459,6 +490,7 @@ namespace http
 			_hpack_decoder = std::make_shared<hpack::Decoder>();
 
 			// Control Stream (stream id : 0) is always open
+			std::unique_lock<std::mutex> lock(_http_stream_map_guard);
 			_http_stream_map.emplace(0, std::make_shared<h2::HttpStream>(GetSharedPtr(), 0));
 		}
 	}  // namespace svr

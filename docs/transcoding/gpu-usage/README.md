@@ -1,13 +1,11 @@
 # Enable GPU Acceleration
 
-OvenMediaEngine supports GPU-based hardware decoding and encoding. Currently supported GPU acceleration devices are Intel's QuickSync and NVIDIA's NVDECODE/NVENCODE. This document describes how to install the video driver for OvenMediaEngine to use the GPU and how to set the Config file. \
+OvenMediaEngine supports GPU-based hardware decoding and encoding. Currently supported GPU acceleration devices are Intel's QuickSync and NVIDIA's NVDECODE/NVENCODE. This document describes how to install the video driver for OvenMediaEngine to use the GPU and how to set the Config file.\
 Please check what graphics card you have and refer to the NVIDIA or Intel driver installation guide.
-
-
 
 ## Reference
 
-* Quick Sync Video format support:  [https://en.wikipedia.org/wiki/Intel\_Quick\_Sync\_Video](https://en.wikipedia.org/wiki/Intel\_Quick\_Sync\_Video#AMD)
+* Quick Sync Video format support: [https://en.wikipedia.org/wiki/Intel\_Quick\_Sync\_Video](https://en.wikipedia.org/wiki/Intel\_Quick\_Sync\_Video#AMD)
 
 ## Install GPU Driver
 
@@ -73,8 +71,6 @@ Thu Jun 17 10:20:23 2021
 +-----------------------------------------------------------------------------+
 ```
 
-
-
 ### Container Toolkit for Docker
 
 Describes how to enable GPU acceleration for users running OvenMediaEngine in the Docker runtime environment. To use GPU acceleration in Docker, the NVIDIA Driver must be installed on the host OS and the NVIDIA Container Toolkit must be installed. This toolkit includes container runtime libraries and utilities to use NVIDIA GPUs in Docker containers.
@@ -110,8 +106,6 @@ If the provided installation script fails, please refer to the manual installati
 [manual-installation.md](manual-installation.md)
 {% endcontent-ref %}
 
-
-
 ## Prerequisites Additional Options
 
 If you have finished installing the driver to use the GPU, you need to reinstall the open source library using Prerequisites.sh . The purpose is to allow external libraries to use the installed graphics driver.
@@ -131,7 +125,7 @@ OvenMediaEngine-master/misc/prerequisites.sh --enable-qsv
 #### When using Docker container
 
 ```bash
-docker build --file Dockerfile -t airensoft/ovenmediaengine:dev --build-arg GPU=TRU
+docker build --file Dockerfile -t airensoft/ovenmediaengine:dev --build-arg GPU=TRUE
 ```
 
 ## Configuration
@@ -208,7 +202,7 @@ make release
 sudo make install
 systemctl start ovenmediaengine
 # If you want automatically start on boot
-systemctl enable ovenmediaengine.service 
+systemctl enable ovenmediaengine.service 
 ```
 {% endtab %}
 
@@ -261,7 +255,5 @@ D : Decoding, E : Encoding
 * NVIDIA NVENV Video Format : [https://en.wikipedia.org/wiki/Nvidia\_NVENC](https://en.wikipedia.org/wiki/Nvidia\_NVENC)
 * CUDA Toolkit Installation Guide : [https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html#introduction](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html#introduction)
 * NVIDIA Container Toolkit : [https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/arch-overview.html#arch-overview](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/arch-overview.html#arch-overview)
-
-
 
 ##

@@ -16,7 +16,8 @@ namespace pvd
 {
 	std::shared_ptr<OvtStream> OvtStream::Create(const std::shared_ptr<pvd::PullApplication> &application, 
 											const uint32_t stream_id, const ov::String &stream_name,
-					  						const std::vector<ov::String> &url_list, std::shared_ptr<pvd::PullStreamProperties> properties)
+					  						const std::vector<ov::String> &url_list, 
+											const std::shared_ptr<pvd::PullStreamProperties> &properties)
 	{
 		info::Stream stream_info(*std::static_pointer_cast<info::Application>(application), StreamSourceType::Ovt);
 
@@ -34,7 +35,7 @@ namespace pvd
 		return stream;
 	}
 
-	OvtStream::OvtStream(const std::shared_ptr<pvd::PullApplication> &application, const info::Stream &stream_info, const std::vector<ov::String> &url_list, std::shared_ptr<pvd::PullStreamProperties> properties)
+	OvtStream::OvtStream(const std::shared_ptr<pvd::PullApplication> &application, const info::Stream &stream_info, const std::vector<ov::String> &url_list, const std::shared_ptr<pvd::PullStreamProperties> &properties)
 			: pvd::PullStream(application, stream_info, url_list, properties)
 	{
 		_last_request_id = 0;
@@ -304,7 +305,7 @@ namespace pvd
 		// Parse stream and add track
 		auto json_stream = json_contents["stream"];
 		auto json_tracks = json_stream["tracks"];
-		auto json_renditions = json_stream["renditions"];
+		auto json_playlists = json_stream["playlists"];
 		
 		// Validation
 		// renditions is optional
@@ -324,15 +325,61 @@ namespace pvd
 
 		// Renditions
 		
-		for (size_t i = 0; i < json_renditions.size(); i++)
+		for (size_t i = 0; i < json_playlists.size(); i++)
 		{
-			auto json_rendition = json_renditions[static_cast<int>(i)];
+			auto json_playlist = json_playlists[static_cast<int>(i)];
 
-			auto name = json_rendition["name"].asString().c_str();
-			auto video_track_name = json_rendition["video_track_name"].asString().c_str();
-			auto audio_track_name = json_rendition["audio_track_name"].asString().c_str();
+			// Validate
+			if (json_playlist["name"].isNull() || json_playlist["fileName"].isNull() || 
+				!json_playlist["options"].isObject() || !json_playlist["renditions"].isArray())
+			{
+				SetState(State::ERROR);
+				logte("Invalid json payload : playlist");
+				return false;
+			}
+			
+			ov::String playlist_name = json_playlist["name"].asString().c_str();
+			ov::String playlist_file_name = json_playlist["fileName"].asString().c_str();
 
-			AddRendition(std::make_shared<Rendition>(name, video_track_name, audio_track_name));
+			auto playlist = std::make_shared<info::Playlist>(playlist_name, playlist_file_name);
+
+			// Options
+			auto json_options = json_playlist["options"];
+
+			if (json_options.isNull() == false)
+			{
+				// Validate
+				if (json_options["webrtcAutoAbr"].isBool())
+				{
+					playlist->SetWebRtcAutoAbr(json_options["webrtcAutoAbr"].asBool());
+				}
+
+				if (json_options["hlsChunklistPathDepth"].isInt())
+				{
+					playlist->SetHlsChunklistPathDepth(json_options["hlsChunklistPathDepth"].asInt());
+				}
+			}
+
+			for (size_t j = 0; j < json_playlist["renditions"].size(); j++)
+			{
+				auto json_rendition = json_playlist["renditions"][static_cast<int>(j)];
+
+				// Validate
+				if (!json_rendition["name"].isString() || !json_rendition["videoTrackName"].isString() || !json_rendition["audioTrackName"].isString())
+				{
+					SetState(State::ERROR);
+					logte("Invalid json payload : playlist rendition");
+					return false;
+				}
+
+				ov::String rendition_name = json_rendition["name"].asString().c_str();
+				ov::String video_track_name = json_rendition["videoTrackName"].asString().c_str();
+				ov::String audio_track_name = json_rendition["audioTrackName"].asString().c_str();
+
+				playlist->AddRendition(std::make_shared<info::Rendition>(rendition_name, video_track_name, audio_track_name));
+			}
+
+			AddPlaylist(playlist);
 		}
 
 		//SetName(json_stream["streamName"].asString().c_str());
@@ -356,7 +403,7 @@ namespace pvd
 			}
 
 			new_track->SetId(json_track["id"].asUInt());
-			new_track->SetName(json_track["name"].asString().c_str());
+			new_track->SetVariantName(json_track["name"].asString().c_str());
 			new_track->SetCodecId(static_cast<cmn::MediaCodecId>(json_track["codecId"].asUInt()));
 			new_track->SetMediaType(static_cast<cmn::MediaType>(json_track["mediaType"].asUInt()));
 			new_track->SetTimeBase(json_track["timebase_num"].asUInt(), json_track["timebase_den"].asUInt());
@@ -650,41 +697,19 @@ namespace pvd
 				media_packet->SetMsid(GetMsid());
 				media_packet->SetPacketType(cmn::PacketType::OVT);
 
-				auto pts = AdjustTimestampByBase(media_packet->GetTrackId(), media_packet->GetPts(), std::numeric_limits<int64_t>::max());
+				auto pts = AdjustTimestampByBase(media_packet->GetTrackId(), media_packet->GetPts(), media_packet->GetDts(), std::numeric_limits<int64_t>::max());
 				auto dts = media_packet->GetDts() + (pts - media_packet->GetPts());
 				[[maybe_unused]] auto old_pts = media_packet->GetPts();
 				[[maybe_unused]] auto old_dts = media_packet->GetDts();
 				media_packet->SetPts(pts);
 				media_packet->SetDts(dts);
 
-				logtp("%s/%s / msid(%d), id(%d) type(%s) flag(%6s), pts_ms(%10lld) pts(%10lld -> %10lld) dts(%10lld -> %10lld) tb(%d/%d)", 
-					GetApplicationName(), 
-					GetName().CStr(), 
-					media_packet->GetMsid(),
-					media_packet->GetTrackId(), 
-					StringFromMediaType(media_packet->GetMediaType()).CStr(), 
-					StringFromMediaPacketFlag(media_packet->GetFlag()).CStr(),
-					(int64_t)(pts * GetTrack(media_packet->GetTrackId())->GetTimeBase().GetExpr() * 1000),
-					old_pts, 
-					pts, 
-					old_dts,
-					dts,
-					GetTrack(media_packet->GetTrackId())->GetTimeBase().GetNum(), 
-					GetTrack(media_packet->GetTrackId())->GetTimeBase().GetDen()
-				);
-
 				// After the MSID is changed, the packet is dropped until key frame is received.
 				bool drop = false;
 				if(_last_msid_map[media_packet->GetTrackId()] != media_packet->GetMsid())
 				{
-					if(media_packet->GetFlag() == MediaPacketFlag::Key ) 
-					{
-						_last_msid_map[media_packet->GetTrackId()] = media_packet->GetMsid();
-					}
-					else 
-					{
-						drop = true;
-					}
+					_last_msid_map[media_packet->GetTrackId()] = media_packet->GetMsid();
+					//  Do not anything if the msid is changed
 				}
 
 				// When switching streams, the PTS of the packet may become negative due to the start time of the first packet. Packets before the base timestamp are defined as a drop policy.

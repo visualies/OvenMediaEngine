@@ -4,17 +4,19 @@ PREFIX=/opt/ovenmediaengine
 TEMP_PATH=/tmp
 
 OME_VERSION=dev
-OPENSSL_VERSION=3.0.2
+OPENSSL_VERSION=3.0.7
 SRTP_VERSION=2.4.2
 SRT_VERSION=1.4.4
 OPUS_VERSION=1.3.1
 VPX_VERSION=1.11.0
 FDKAAC_VERSION=2.0.2
 NASM_VERSION=2.15.05
-FFMPEG_VERSION=4.4.1
-JEMALLOC_VERSION=5.2.1
+FFMPEG_VERSION=5.0.1
+JEMALLOC_VERSION=5.3.0
 PCRE2_VERSION=10.39
-OPENH264_VERSION=2.1.1
+OPENH264_VERSION=2.3.0
+HIREDIS_VERSION=1.0.2
+
 INTEL_QSV_HWACCELS=false
 NVIDIA_VIDEO_CODEC_HWACCELS=false
 
@@ -167,8 +169,8 @@ install_nasm()
 	./autogen.sh && \
     ./configure --prefix="${PREFIX}" && \
     make -j$(nproc) && \
-	touch nasm.1 && \ # To avoid error in nasm install package
-	touch ndisasm.1 && \ # To avoid error in nasm install package
+	touch nasm.1 && \
+	touch ndisasm.1 && \
     sudo make install && \
     rm -rf ${DIR}) || fail_exit "nasm"
 }
@@ -213,8 +215,7 @@ install_ffmpeg()
         PATH=$PATH:/usr/local/nvidia/bin:/usr/local/cuda/bin
     fi
 
-    # Add options as environmental variable values.
-
+    # Options are added by external scripts.
     if [[ -n "${EXT_FFMPEG_LICENSE}" ]]; then 
         ADDI_LICENSE+=${EXT_FFMPEG_LICENSE}
     fi
@@ -227,16 +228,28 @@ install_ffmpeg()
         ADDI_ENCODER+=${EXT_FFMPEG_ENCODER}
     fi
 
+    if [[ -n "${EXT_FFMPEG_DECODER}" ]] ; then 
+        ADDI_DECODER+=${EXT_FFMPEG_DECODER}
+    fi
 
-    (DIR=${TEMP_PATH}/ffmpeg && \
-    mkdir -p ${DIR} && \
+    # Defining a Temporary Installation Path
+    DIR=${TEMP_PATH}/ffmpeg
+
+    # Download
+    (rm -rf ${DIR}  && mkdir -p ${DIR} && \
     cd ${DIR} && \
-    curl -sLf https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n${FFMPEG_VERSION}.tar.gz | tar -xz --strip-components=1 && \
-    sed -i 's/compute_30/compute_60/g' ./configure && \
-    sed -i 's/sm_30/sm_60/g' ./configure && \
-    PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/lib64/pkgconfig:${PREFIX}/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH} ./configure \
+    curl -sLf https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n${FFMPEG_VERSION}.tar.gz | tar -xz --strip-components=1 ) || fail_exit "ffmpeg"
+
+    # Patch for Enterprise
+    if [[ "$(type -t install_patch_ffmpeg)"  == 'function' ]];
+    then
+        install_patch_ffmpeg ${DIR}
+    fi
+
+    # Build & Install 
+    (cd ${DIR} && PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/lib64/pkgconfig:${PREFIX}/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH} ./configure \
     --prefix="${PREFIX}" \
-    --extra-cflags="-I${PREFIX}/include ${ADDI_CFLAGS}"  \
+    --extra-cflags="-I${PREFIX}/include -g ${ADDI_CFLAGS}"  \
     --extra-ldflags="-L${PREFIX}/lib ${ADDI_LDFLAGS} -Wl,-rpath,${PREFIX}/lib" \
     --extra-libs=-ldl \
     ${ADDI_LICENSE} \
@@ -287,6 +300,16 @@ install_libpcre2()
     rm -rf ${DIR} ) || fail_exit "libpcre2"
 }
 
+install_hiredis()
+{
+	(DIR=${TEMP_PATH}/hiredis && \
+    mkdir -p ${DIR} && \
+    cd ${DIR} && \
+    curl -sLf https://github.com/redis/hiredis/archive/refs/tags/v${HIREDIS_VERSION}.tar.gz | tar -xz --strip-components=1 && \
+    make -j$(nproc) && \
+    sudo make install PREFIX="${PREFIX}" && \
+    rm -rf ${DIR} ) || fail_exit "hiredis"
+}
 
 install_base_ubuntu()
 {
@@ -362,6 +385,10 @@ check_version()
         proceed_yn
     fi
 
+	if [[ "${OSNAME}" == "Red" && "${OSVERSION}" != "8" ]]; then
+        proceed_yn
+    fi
+
 	if [[ "${OSNAME}" == "Amazon Linux" && "${OSVERSION}" != "2" ]]; then
         proceed_yn
     fi
@@ -415,6 +442,9 @@ elif  [ "${OSNAME}" == "Amazon Linux" ]; then
 elif  [ "${OSNAME}" == "Fedora" ]; then
     check_version
     install_base_fedora
+elif  [ "${OSNAME}" == "Red" ]; then
+    check_version
+    install_base_fedora
 elif  [ "${OSNAME}" == "Mac OS X" ]; then
     install_base_macos
 else
@@ -433,6 +463,7 @@ install_fdk_aac
 install_ffmpeg
 install_jemalloc
 install_libpcre2
+install_hiredis
 
 if [ "${WITH_OME}" == "true" ]; then
     install_ovenmediaengine

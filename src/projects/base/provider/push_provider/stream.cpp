@@ -24,8 +24,24 @@ namespace pvd
 	PushStream::PushStream(StreamSourceType source_type, uint32_t channel_id, const std::shared_ptr<PushProvider> &provider)
 		: Stream(source_type)
 	{
-		SetId(channel_id);
+		SetId(pvd::Application::IssueUniqueStreamId());
 		_channel_id = channel_id;
+		_provider = provider;
+	}
+
+	PushStream::PushStream(StreamSourceType source_type, ov::String channel_name, const std::shared_ptr<PushProvider> &provider)
+		: PushStream(source_type, provider)
+	{
+		SetName(channel_name);
+	}
+
+	PushStream::PushStream(StreamSourceType source_type, const std::shared_ptr<PushProvider> &provider)
+		: Stream(source_type)
+	{
+		auto id = pvd::Application::IssueUniqueStreamId();
+		SetId(id);
+		// If the channel id is not given, use the stream id as the channel id
+		_channel_id = id;
 		_provider = provider;
 	}
 
@@ -72,14 +88,14 @@ namespace pvd
 
 	bool PushStream::PublishChannel(const info::VHostAppName &vhost_app_name)
 	{
-		if(_provider == nullptr)
+		if(GetProvider() == nullptr)
 		{
 			return false;
 		}
 
 		_attemps_publish_count++;
 		
-		_is_published = _provider->PublishChannel(GetChannelId(), vhost_app_name, GetSharedPtrAs<PushStream>());
+		_is_published = GetProvider()->PublishChannel(GetChannelId(), vhost_app_name, GetSharedPtrAs<PushStream>());
 
 		return _is_published;
 	}

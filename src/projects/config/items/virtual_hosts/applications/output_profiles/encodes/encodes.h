@@ -35,12 +35,62 @@ namespace cfg
 				protected:
 					void MakeList() override
 					{
-						Register<Optional>({"Audio", "audios"}, &_audio_profiles);
-						Register<Optional>({"Video", "videos"}, &_video_profiles);
-						Register<Optional>({"Image", "images"}, &_image_profiles);
+						Register<Optional>({"Audio", "audios"}, &_audio_profiles, 
+						[=]() -> std::shared_ptr<ConfigError> {
+							return nullptr;
+						},
+						[=]() -> std::shared_ptr<ConfigError> {
+							
+							uint32_t index = 0;
+							for (auto &profile : _audio_profiles)
+							{
+								if (profile.GetName().IsEmpty())
+								{
+									profile.SetName(ov::String::FormatString("audio_%d", index));
+									index++;
+								}
+							}
+
+							return nullptr;
+						});
+
+						Register<Optional>({"Video", "videos"}, &_video_profiles, 
+						[=]() -> std::shared_ptr<ConfigError> {
+							return nullptr;
+						},
+						[=]() -> std::shared_ptr<ConfigError> {
+							uint32_t index = 0;
+							for (auto &profile : _video_profiles)
+							{
+								if (profile.GetName().IsEmpty())
+								{
+									profile.SetName(ov::String::FormatString("video_%d", index));
+									index++;
+								}
+							}
+
+							return nullptr;
+						});
+						Register<Optional>({"Image", "images"}, &_image_profiles,
+						[=]() -> std::shared_ptr<ConfigError> {
+							return nullptr;
+						},
+						[=]() -> std::shared_ptr<ConfigError> {
+							uint32_t index = 0;
+							for (auto &profile : _image_profiles)
+							{
+								if (profile.GetName().IsEmpty())
+								{
+									profile.SetName(ov::String::FormatString("image_%d", index));
+									index++;
+								}
+							}
+
+							return nullptr;
+						});
 					}
 				};
 			}  // namespace oprf
-		}	   // namespace app
-	}		   // namespace vhost
+		} // namespace app
+	} // namespace vhost
 }  // namespace cfg

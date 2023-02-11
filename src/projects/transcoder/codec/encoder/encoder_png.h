@@ -20,12 +20,17 @@ public:
 		return AV_CODEC_ID_PNG;
 	}
 
-	int GetPixelFormat() const noexcept override
+	int GetSupportedFormat() const noexcept override
 	{
 		return AV_PIX_FMT_RGBA;
 	}
 
-	bool Configure(std::shared_ptr<TranscodeContext> context) override;
+	cmn::BitstreamFormat GetBitstreamFormat() const noexcept override
+	{
+		return cmn::BitstreamFormat::PNG;
+	}
+	
+	bool Configure(std::shared_ptr<MediaTrack> context) override;
 
 	void CodecThread() override;
 

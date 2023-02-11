@@ -23,7 +23,7 @@ public:
 		{
 		}
 
-		SegmentInfo(uint32_t sequence, uint64_t start_time, float_t duration, uint64_t size, ov::String url, ov::String next_url, bool is_independent)
+		SegmentInfo(uint32_t sequence, int64_t start_time, double duration, uint64_t size, ov::String url, ov::String next_url, bool is_independent)
 			: _sequence(sequence)
 			, _start_time(start_time)
 			, _duration(duration)
@@ -34,7 +34,7 @@ public:
 		{
 		}
 
-		void UpdateInfo(uint64_t start_time, float_t duration, uint64_t size, ov::String url, bool is_independent)
+		void UpdateInfo(int64_t start_time, double duration, uint64_t size, ov::String url, bool is_independent)
 		{
 			this->_start_time = start_time;
 			this->_duration = duration;
@@ -43,7 +43,7 @@ public:
 			this->_is_independent = is_independent;
 		}
 
-		uint64_t GetStartTime() const
+		int64_t GetStartTime() const
 		{
 			if (_partial_segments.empty() == false)
 			{
@@ -58,7 +58,7 @@ public:
 			return _sequence;
 		}
 
-		float_t GetDuration() const
+		double GetDuration() const
 		{
 			return _duration;
 		}
@@ -102,6 +102,13 @@ public:
 			return _partial_segments;
 		}
 
+		// Clear partial segments
+		void ClearPartialSegments()
+		{
+			_partial_segments.clear();
+			_partial_segments.shrink_to_fit();
+		}
+
 		void SetCompleted()
 		{
 			_completed = true;
@@ -112,10 +119,31 @@ public:
 			return _completed;
 		}
 
+		ov::String GetStartDate() const
+		{
+			ov::String start_date;
+
+			// Convert start time to date
+			{
+				time_t start_time = _start_time / 1000;
+				struct tm *tm = localtime(&start_time);
+				char date[64];
+				strftime(date, sizeof(date), "%Y-%m-%dT%H:%M:%S", tm);
+				start_date = date;
+			}
+
+			return start_date;
+		}
+
+		ov::String ToString() const
+		{
+			return ov::String::FormatString("seq(%d) start_date(%s) duration(%f) size(%lu) url(%s) next_url(%s) is_independent(%s) completed(%s)", _sequence, GetStartDate().CStr(), _duration, _size, _url.CStr(), _next_url.CStr(), _is_independent ? "true" : "false", _completed ? "true" : "false");
+		}
+
 	private:
 		int64_t _sequence = -1;
-		uint64_t _start_time = 0; // milliseconds since epoce (1970-01-01 00:00:00)
-		float_t _duration = 0; // seconds
+		int64_t _start_time = 0; // milliseconds since epoce (1970-01-01 00:00:00)
+		double _duration = 0; // seconds
 		uint64_t _size = 0;
 		ov::String _url;
 		ov::String _next_url;
@@ -125,41 +153,69 @@ public:
 		std::deque<std::shared_ptr<SegmentInfo>> _partial_segments;
 	}; // class SegmentInfo
 
-	LLHlsChunklist(const ov::String &url, const std::shared_ptr<const MediaTrack> &track, uint32_t max_segments, uint32_t target_duration, float part_target_duration, const ov::String &map_uri);
+	LLHlsChunklist(const ov::String &url, const std::shared_ptr<const MediaTrack> &track, uint32_t target_duration, double part_target_duration, const ov::String &map_uri);
+
+	~LLHlsChunklist();
+
+	// A LLHlsChunklist has circular dependency issues because it holds its own pointer and pointers to all other chunklists. 
+	// Therefore, you must call the Release function.
+	void Release();
 
 	const ov::String& GetUrl() const;
+
+	// Set all renditions info for ABR
+	void SetRenditions(const std::map<int32_t, std::shared_ptr<LLHlsChunklist>> &renditions);
+
+	void SaveOldSegmentInfo(bool enable);
+
+	// Get Track
+	const std::shared_ptr<const MediaTrack> &GetTrack() const;
 
 	void SetPartHoldBack(const float &part_hold_back);
 
 	bool AppendSegmentInfo(const SegmentInfo &info);
 	bool AppendPartialSegmentInfo(uint32_t segment_sequence, const SegmentInfo &info);
+	bool RemoveSegmentInfo(uint32_t segment_sequence);
 
-	ov::String ToString(const ov::String &query_string, const std::map<int32_t, std::shared_ptr<LLHlsChunklist>> &renditions, bool skip=false) const;
-	std::shared_ptr<const ov::Data> ToGzipData(const ov::String &query_string, const std::map<int32_t, std::shared_ptr<LLHlsChunklist>> &renditions, bool skip=false) const;
+	ov::String ToString(const ov::String &query_string, bool skip, bool legacy, bool vod = false, uint32_t vod_start_segment_number = 0) const;
+	std::shared_ptr<const ov::Data> ToGzipData(const ov::String &query_string, bool skip, bool legacy) const;
 
 	std::shared_ptr<SegmentInfo> GetSegmentInfo(uint32_t segment_sequence) const;
 	bool GetLastSequenceNumber(int64_t &msn, int64_t &psn) const;
 
 private:
-
 	int64_t GetSegmentIndex(uint32_t segment_sequence) const;
+	bool SaveOldSegmentInfo(std::shared_ptr<SegmentInfo> &segment_info);
+
+	ov::String MakeChunklist(const ov::String &query_string, bool skip, bool legacy, bool vod = false, uint32_t vod_start_segment_number = 0) const;
 
 	std::shared_ptr<const MediaTrack> _track;
 
 	ov::String _url;
 
-	uint32_t _max_segments = 0;
-	float_t _target_duration = 0;
-	float_t _part_target_duration = 0;
-	float_t _max_part_duration = 0;
-	float_t _part_hold_back = 0;
+	double _target_duration = 0;
+	double _part_target_duration = 0;
+	double _max_part_duration = 0;
+	double _part_hold_back = 0;
 	ov::String _map_uri;
 
-	int64_t _last_segment_sequence = -1;
-	int64_t _last_partial_segment_sequence = -1;
+	std::atomic<int64_t> _last_segment_sequence = -1;
+	std::atomic<int64_t> _last_partial_segment_sequence = -1;
 
 	// Segment number -> SegmentInfo
 	std::deque<std::shared_ptr<SegmentInfo>> _segments;
+	std::deque<std::shared_ptr<SegmentInfo>> _old_segments;
 	mutable std::shared_mutex _segments_guard;
 	uint64_t _deleted_segments = 0;
+	bool _keep_old_segments = false;
+
+	std::map<int32_t, std::shared_ptr<LLHlsChunklist>> _renditions;
+
+	ov::String _cached_default_chunklist;
+	mutable std::shared_mutex _cached_default_chunklist_guard;
+
+	std::shared_ptr<ov::Data> _cached_default_chunklist_gzip;
+	mutable std::shared_mutex _cached_default_chunklist_gzip_guard;
+
+	void UpdateCacheForDefaultChunklist();
 };

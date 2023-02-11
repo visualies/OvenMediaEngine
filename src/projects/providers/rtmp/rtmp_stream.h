@@ -26,6 +26,7 @@
 // Fix track id
 #define RTMP_VIDEO_TRACK_ID		0
 #define RTMP_AUDIO_TRACK_ID		1
+#define RTMP_DATA_TRACK_ID		2
 
 namespace pvd
 {
@@ -104,6 +105,9 @@ namespace pvd
 		void ReceiveAmfCommandMessage(const std::shared_ptr<const RtmpMessage> &message);
 		void ReceiveAmfDataMessage(const std::shared_ptr<const RtmpMessage> &message);
 
+		bool CheckEventMessage(const std::shared_ptr<const RtmpChunkHeader> &header, AmfDocument &document);
+		void GenerateEvent(const cfg::vhost::app::pvd::Event &event, const ov::String &value);
+
 		bool ReceiveAudioMessage(const std::shared_ptr<const RtmpMessage> &message);
 		bool ReceiveVideoMessage(const std::shared_ptr<const RtmpMessage> &message);
 
@@ -118,6 +122,8 @@ namespace pvd
 
 		bool CheckAccessControl();
 		bool CheckStreamExpired();
+
+		void AdjustTimestamp(int64_t &pts, int64_t &dts);
 
 		// RTMP related
 		RtmpHandshakeState _handshake_state = RtmpHandshakeState::Uninitialized;
@@ -165,6 +171,17 @@ namespace pvd
 		// Singed Policy
 		uint64_t _stream_expired_msec = 0;
 
+		// Make first PTS 0
+		bool _first_frame = true;
+		int64_t _first_pts_offset = 0;
+		int64_t _first_dts_offset = 0;
+
+		// Data frame
+		int64_t _last_video_pts = 0;
+		ov::StopWatch _last_video_pts_clock;
+		int64_t _last_audio_pts = 0;
+		ov::StopWatch _last_audio_pts_clock;
+
 		// For statistics 
 		time_t _stream_check_time = 0;
 
@@ -178,5 +195,8 @@ namespace pvd
 		uint32_t _audio_frame_count = 0;
 
 		bool _negative_cts_detected = false;
+
+		cfg::vhost::app::pvd::EventGenerator _event_generator;
+		ov::DelayQueue _event_test_timer{"RtmpEventTestTimer"};
 	};
 }

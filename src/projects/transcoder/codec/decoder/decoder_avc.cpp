@@ -11,14 +11,14 @@
 #include "../../transcoder_private.h"
 #include "base/info/application.h"
 
-bool DecoderAVC::Configure(std::shared_ptr<TranscodeContext> context)
+bool DecoderAVC::Configure(std::shared_ptr<MediaTrack> context)
 {
 	if (TranscodeDecoder::Configure(context) == false)
 	{
 		return false;
 	}
 
-	AVCodec *_codec = ::avcodec_find_decoder(GetCodecID());
+	const AVCodec *_codec = ::avcodec_find_decoder(GetCodecID());
 	if (_codec == nullptr)
 	{
 		logte("Codec not found: %s (%d)", ::avcodec_get_name(GetCodecID()), GetCodecID());
@@ -32,10 +32,10 @@ bool DecoderAVC::Configure(std::shared_ptr<TranscodeContext> context)
 		return false;
 	}
 
-	_context->time_base = TimebaseToAVRational(GetTimebase());
+	_context->time_base = ffmpeg::Conv::TimebaseToAVRational(GetTimebase());
 
 	// Set the number of b frames for compatibility with specific encoders.
-	auto bframes = GetContext()->GetH264hasBframes();
+	auto bframes = GetRefTrack()->HasBframes()?1:0;
 	if (bframes > 0)
 	{
 		_context->has_b_frames = bframes;
@@ -150,7 +150,12 @@ void DecoderAVC::CodecThread()
 				{
 					// If only SPS/PPS Nalunit is entered in the decoder, an invalid data error occurs.
 					// There is no particular problem.
-					logtd("Invalid data found when processing input (%d)", ret);
+					auto empty_frame = std::make_shared<MediaFrame>();
+					empty_frame->SetPts(dts);
+					empty_frame->SetMediaType(cmn::MediaType::Video);
+
+					SendOutputBuffer(TranscodeResult::NoData, std::move(empty_frame));
+
 					break;
 				}
 				else if (ret < 0)
@@ -220,7 +225,7 @@ void DecoderAVC::CodecThread()
 				}
 
 				// If there is no duration, the duration is calculated by framerate and timebase.
-				_frame->pkt_duration = (_frame->pkt_duration <= 0LL) ? ffmpeg::Conv::GetDurationPerFrame(cmn::MediaType::Video, _input_context) : _frame->pkt_duration;
+				// _frame->pkt_duration = (_frame->pkt_duration <= 0LL) ? ffmpeg::Conv::GetDurationPerFrame(cmn::MediaType::Video, GetRefTrack()) : _frame->pkt_duration;
 
 				auto decoded_frame = ffmpeg::Conv::ToMediaFrame(cmn::MediaType::Video, _frame);
 				::av_frame_unref(_frame);
@@ -229,7 +234,7 @@ void DecoderAVC::CodecThread()
 					continue;
 				}
 
-				SendOutputBuffer(need_to_change_notify, _track_id, std::move(decoded_frame));
+				SendOutputBuffer(need_to_change_notify ? TranscodeResult::FormatChanged : TranscodeResult::DataReady, std::move(decoded_frame));
 			}
 		}
 	}

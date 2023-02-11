@@ -53,6 +53,9 @@ namespace pvd
 
 		virtual bool Start();
 		virtual bool Stop();
+		virtual bool Terminate();
+
+		bool SendDataFrame(int64_t timestamp, const cmn::BitstreamFormat &format, const cmn::PacketType &packet_type, const std::shared_ptr<ov::Data> &frame);
 
 	protected:
 		Stream(const std::shared_ptr<pvd::Application> &application, StreamSourceType source_type);
@@ -66,18 +69,22 @@ namespace pvd
 		bool SendFrame(const std::shared_ptr<MediaPacket> &packet);
 
 		void ResetSourceStreamTimestamp();
-		int64_t AdjustTimestampByBase(uint32_t track_id, int64_t timestamp, int64_t max_timestamp);
+		int64_t AdjustTimestampByBase(uint32_t track_id, int64_t pts,  int64_t dts, int64_t max_timestamp);
 		int64_t AdjustTimestampByDelta(uint32_t track_id, int64_t timestamp, int64_t max_timestamp);
 		int64_t GetDeltaTimestamp(uint32_t track_id, int64_t timestamp, int64_t max_timestamp);
 		int64_t GetBaseTimestamp(uint32_t track_id);
 		std::shared_ptr<pvd::Application> _application = nullptr;
-
+		void UpdateReconnectTimeToBasetime();
+	
 	private:
 		// TrackID : Timestamp(us)
 		std::map<uint32_t, int64_t>			_source_timestamp_map;
 		std::map<uint32_t, int64_t>			_last_timestamp_map;
 		std::map<uint32_t, int64_t>			_base_timestamp_map;
+
 		int64_t								_start_timestamp = -1LL;
+		std::chrono::time_point<std::chrono::system_clock>	_last_pkt_received_time = std::chrono::time_point<std::chrono::system_clock>::min();
+
 		State 	_state = State::IDLE;
 	};
 }

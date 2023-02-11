@@ -39,7 +39,10 @@ namespace cmn
 		OPUS,/*raw*/		// OME's default internal bitstream format for OPUS
 		OPUS_RTP_RFC_7587,
 		JPEG,
-		PNG
+		PNG,
+
+		// For Data Track
+		ID3v2,
 	};
 
 	enum class PacketType : int8_t
@@ -53,6 +56,11 @@ namespace cmn
 		// H.264
 		SEQUENCE_HEADER, // For H.264 AVCC, AAC RAW
 		NALU, // For H.264 AVCC, ANNEXB	
+
+		// For Data Track
+		EVENT,
+		VIDEO_EVENT,
+		AUDIO_EVENT,
 	};
 
 	enum class PictureType : uint8_t
@@ -79,8 +87,267 @@ namespace cmn
 		Mp3,
 		Opus,
 		Jpeg,
-		Png
+		Png,
 	};
+
+	enum class MediaCodecLibraryId : uint8_t
+	{
+		AUTO,
+		OPENH264,
+		BEAMR,
+		NVENC,
+		QSV,
+		LIBVPX,
+		FDKAAC,
+		LIBOPUS,
+		NB
+	};
+
+	static bool IsVideoCodec(cmn::MediaCodecId codec_id)
+	{
+		if (codec_id == cmn::MediaCodecId::H264 || codec_id == cmn::MediaCodecId::H265 || codec_id == cmn::MediaCodecId::Vp8 || codec_id == cmn::MediaCodecId::Flv ||
+			codec_id == cmn::MediaCodecId::Vp9 || codec_id == cmn::MediaCodecId::Jpeg || codec_id == cmn::MediaCodecId::Png)
+		{
+			return true;
+		}
+
+		return false;
+	}
+
+	static bool IsImageCodec(cmn::MediaCodecId codec_id) {
+		if (codec_id == cmn::MediaCodecId::Jpeg || 
+		    codec_id == cmn::MediaCodecId::Png)
+		{
+			return true;
+		}
+
+		return false;
+	}
+
+	static bool IsAudioCodec(cmn::MediaCodecId codec_id)
+	{
+		if (codec_id == cmn::MediaCodecId::Aac ||
+			codec_id == cmn::MediaCodecId::Mp3 ||
+			codec_id == cmn::MediaCodecId::Opus)
+		{
+			return true;
+		}
+
+		return false;
+	}
+
+	static ov::String GetMeiaPacketTypeString(cmn::PacketType packet_type)
+	{
+		switch (packet_type)
+		{
+			case cmn::PacketType::OVT:
+				return "OVT";
+			case cmn::PacketType::RAW:
+				return "RAW";
+			case cmn::PacketType::SEQUENCE_HEADER:
+				return "SEQUENCE_HEADER";
+			case cmn::PacketType::NALU:
+				return "NALU";
+			case cmn::PacketType::VIDEO_EVENT:
+				return "VIDEO_EVENT";
+			case cmn::PacketType::AUDIO_EVENT:
+				return "AUDIO_EVENT";
+			default:
+				return "Unknown";
+		}
+	}
+
+	static ov::String GetMediaTypeString(cmn::MediaType media_type)
+	{
+		switch (media_type)
+		{
+			case cmn::MediaType::Video:
+				return "Video";
+			case cmn::MediaType::Audio:
+				return "Audio";
+			case cmn::MediaType::Data:
+				return "Data";
+			case cmn::MediaType::Subtitle:
+				return "Subtitle";
+			case cmn::MediaType::Attachment:
+				return "Attachment";
+			default:
+				return "Unknown";
+		}
+	}
+
+	static ov::String GetBitstreamFormatString(cmn::BitstreamFormat format) {
+		switch (format) {
+			case cmn::BitstreamFormat::H264_AVCC:
+				return "H264_AVCC";
+			case cmn::BitstreamFormat::H264_ANNEXB:
+				return "H264_ANNEXB";
+			case cmn::BitstreamFormat::H264_RTP_RFC_6184:
+				return "H264_RTP_RFC_6184";
+			case cmn::BitstreamFormat::H265_ANNEXB:
+				return "H265_ANNEXB";
+			case cmn::BitstreamFormat::VP8:
+				return "VP8";
+			case cmn::BitstreamFormat::VP8_RTP_RFC_7741:
+				return "VP8_RTP_RFC_7741";
+			case cmn::BitstreamFormat::AAC_RAW:
+				return "AAC_RAW";
+			case cmn::BitstreamFormat::AAC_MPEG4_GENERIC:
+				return "AAC_MPEG4_GENERIC";
+			case cmn::BitstreamFormat::AAC_ADTS:
+				return "AAC_ADTS";
+			case cmn::BitstreamFormat::AAC_LATM:
+				return "AAC_LATM";
+			case cmn::BitstreamFormat::OPUS:
+				return "OPUS";
+			case cmn::BitstreamFormat::OPUS_RTP_RFC_7587:
+				return "OPUS_RTP_RFC_7587";
+			case cmn::BitstreamFormat::JPEG:
+				return "JPEG";
+			case cmn::BitstreamFormat::PNG:
+				return "PNG";
+			case cmn::BitstreamFormat::ID3v2:
+				return "ID3v2";
+			default:
+				return "Unknown";
+		}
+	}
+
+	static cmn::MediaCodecLibraryId GetCodecLibraryIdByName(ov::String name)
+	{
+		name.MakeUpper();
+
+		if (name.HasSuffix("_OPENH264"))
+		{
+			return cmn::MediaCodecLibraryId::OPENH264;
+		}
+		else if (name.HasSuffix("_BEAMR"))
+		{
+			return cmn::MediaCodecLibraryId::BEAMR;
+		}
+		else if (name.HasSuffix("_NVENC"))
+		{
+			return cmn::MediaCodecLibraryId::NVENC;
+		}
+		else if (name.HasSuffix("_QSV"))
+		{
+			return cmn::MediaCodecLibraryId::QSV;
+		}
+		else if (name.HasSuffix("_LIBVPX"))
+		{
+			return cmn::MediaCodecLibraryId::LIBVPX;
+		}
+		else if (name.HasSuffix("_FDKAAC"))
+		{
+			return cmn::MediaCodecLibraryId::FDKAAC;
+		}
+
+		return cmn::MediaCodecLibraryId::AUTO;
+	}
+
+	static ov::String GetStringFromCodecLibraryId(cmn::MediaCodecLibraryId id)
+	{
+		switch (id)
+		{
+			case cmn::MediaCodecLibraryId::OPENH264:
+				return "OpenH264";
+			case cmn::MediaCodecLibraryId::BEAMR:
+				return "Beamr";
+			case cmn::MediaCodecLibraryId::NVENC:
+				return "nvenc";
+			case cmn::MediaCodecLibraryId::QSV:
+				return "qsv";
+			case cmn::MediaCodecLibraryId::LIBVPX:
+				return "libvpx";
+			case cmn::MediaCodecLibraryId::FDKAAC:
+				return "fdkaac";
+			case cmn::MediaCodecLibraryId::LIBOPUS:
+				return "libopus";				
+			case cmn::MediaCodecLibraryId::AUTO:
+			default:
+				break;
+		}
+
+		return "Auto";
+	}
+
+	static ov::String GetStringFromCodecId(cmn::MediaCodecId id)
+	{
+		switch (id)
+		{
+			case cmn::MediaCodecId::H264:
+				return "H264";
+			case cmn::MediaCodecId::H265:
+				return "H265";
+			case cmn::MediaCodecId::Vp8:
+				return "VP8";
+			case cmn::MediaCodecId::Vp9:
+				return "VP9";
+			case cmn::MediaCodecId::Aac:
+				return "AAC";
+			case cmn::MediaCodecId::Opus:
+				return "OPUS";
+			case cmn::MediaCodecId::Jpeg:
+				return "JPEG";
+			case cmn::MediaCodecId::Png:
+				return "PNG";
+			default:
+				break;
+		}
+
+		return "Unknown";
+	}
+
+	static cmn::MediaCodecId GetCodecIdByName(ov::String name)
+	{
+		name.MakeUpper();
+
+		// Video codecs
+		if (name == "H264" || name == "H264_OPENH264" || name == "H264_BEAMR" || name == "H264_NVENC" || name == "H264_QSV")
+		{
+			return cmn::MediaCodecId::H264;
+		}
+		else if (name == "H265" || name == "H265_NVENC" || name == "H265_QSV")
+		{
+			return cmn::MediaCodecId::H265;
+		}
+		else if (name == "VP8")
+		{
+			return cmn::MediaCodecId::Vp8;
+		}
+		else if (name == "VP9")
+		{
+			return cmn::MediaCodecId::Vp9;
+		}
+		else if (name == "FLV")
+		{
+			return cmn::MediaCodecId::Flv;
+		}
+		else if (name == "JPEG")
+		{
+			return cmn::MediaCodecId::Jpeg;
+		}
+		else if (name == "PNG")
+		{
+			return cmn::MediaCodecId::Png;
+		}
+
+		// Audio codecs
+		if (name == "AAC")
+		{
+			return cmn::MediaCodecId::Aac;
+		}
+		else if (name == "MP3")
+		{
+			return cmn::MediaCodecId::Mp3;
+		}
+		else if (name == "OPUS")
+		{
+			return cmn::MediaCodecId::Opus;
+		}
+
+		return cmn::MediaCodecId::None;
+	}
 
 	//////////////////////////////////////////////////////////////////////////////////////////////////
 	// Timebase
@@ -145,11 +412,11 @@ namespace cmn
 
 		double GetTimescale() const
 		{
-			if(_num == 0)
+			if (_num == 0)
 			{
 				return 0.0;
 			}
-			
+
 			return (double)_den / (double)_num;
 		}
 
@@ -192,7 +459,7 @@ namespace cmn
 		{
 			None = -1,
 
-			U8 = 0,   ///< unsigned 8 bits
+			U8 = 0,	  ///< unsigned 8 bits
 			S16 = 1,  ///< signed 16 bits
 			S32 = 2,  ///< signed 32 bits
 			Flt = 3,  ///< float
@@ -285,7 +552,7 @@ namespace cmn
 		{
 			return _sample_size;
 		}
-		
+
 		AudioSample::Format GetFormat() const
 		{
 			return _format;
@@ -334,9 +601,7 @@ namespace cmn
 		{
 			LayoutUnknown = 0x00000000U,				// AV_CH_LAYOUT_Unknown
 			LayoutMono = 0x00000004U,					// AV_CH_LAYOUT_MONO
-			LayoutStereo = (0x00000001U | 0x00000002U)  // AV_CH_FRONT_LEFT|AV_CH_FRONT_RIGHT
-
-			// TODO(SOULK) : Need to support additional layout
+			LayoutStereo = (0x00000001U | 0x00000002U)	// AV_CH_FRONT_LEFT|AV_CH_FRONT_RIGHT
 		};
 
 	public:
@@ -364,15 +629,15 @@ namespace cmn
 			}
 		}
 
-		void SetCount(uint32_t count) {
+		void SetCount(uint32_t count)
+		{
 			_count = count;
 			switch (_count)
 			{
-				OV_MEDIA_TYPE_SET_VALUE(0, _layout=Layout::LayoutUnknown, _name = "unknown");
-				OV_MEDIA_TYPE_SET_VALUE(1, _layout=Layout::LayoutMono, _name = "mono");
-				OV_MEDIA_TYPE_SET_VALUE(2, _layout=Layout::LayoutStereo, _name = "stereo");
-				
-			}			
+				OV_MEDIA_TYPE_SET_VALUE(0, _layout = Layout::LayoutUnknown, _name = "unknown");
+				OV_MEDIA_TYPE_SET_VALUE(1, _layout = Layout::LayoutMono, _name = "mono");
+				OV_MEDIA_TYPE_SET_VALUE(2, _layout = Layout::LayoutStereo, _name = "stereo");
+			}
 		}
 
 		// channel layout

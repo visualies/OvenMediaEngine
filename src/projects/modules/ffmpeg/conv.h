@@ -25,7 +25,6 @@ extern "C"
 #include <base/ovlibrary/ovlibrary.h>
 #include <transcoder/transcoder_context.h>
 
-
 namespace ffmpeg
 {
 	class Conv
@@ -77,16 +76,16 @@ namespace ffmpeg
 					sample_fmt = cmn::AudioSample::Format::U8;
 					break;
 				case AV_SAMPLE_FMT_S16:
-					sample_fmt = cmn::AudioSample::Format::S16P;
+					sample_fmt = cmn::AudioSample::Format::S16;
 					break;
 				case AV_SAMPLE_FMT_S32:
-					sample_fmt = cmn::AudioSample::Format::S16P;
+					sample_fmt = cmn::AudioSample::Format::S32;
 					break;
 				case AV_SAMPLE_FMT_FLT:
-					sample_fmt = cmn::AudioSample::Format::S16P;
+					sample_fmt = cmn::AudioSample::Format::Flt;
 					break;
 				case AV_SAMPLE_FMT_DBL:
-					sample_fmt = cmn::AudioSample::Format::S16P;
+					sample_fmt = cmn::AudioSample::Format::Dbl;
 					break;
 				case AV_SAMPLE_FMT_U8P:
 					sample_fmt = cmn::AudioSample::Format::U8P;
@@ -105,6 +104,49 @@ namespace ffmpeg
 					break;
 				default:
 					sample_fmt = cmn::AudioSample::Format::None;
+					break;
+			}
+
+			return sample_fmt;
+		}
+
+		static int ToAvSampleFormat(cmn::AudioSample::Format format)
+		{
+			int sample_fmt;
+			switch (format)
+			{
+				case cmn::AudioSample::Format::U8:
+					sample_fmt = AV_SAMPLE_FMT_U8;
+					break;
+				case cmn::AudioSample::Format::S16:
+					sample_fmt = AV_SAMPLE_FMT_S16;
+					break;
+				case cmn::AudioSample::Format::S32:
+					sample_fmt = AV_SAMPLE_FMT_S32;
+					break;
+				case cmn::AudioSample::Format::Flt:
+					sample_fmt = AV_SAMPLE_FMT_FLT;
+					break;
+				case cmn::AudioSample::Format::Dbl:
+					sample_fmt = AV_SAMPLE_FMT_DBL;
+					break;
+				case cmn::AudioSample::Format::U8P:
+					sample_fmt = AV_SAMPLE_FMT_U8P;
+					break;
+				case cmn::AudioSample::Format::S16P:
+					sample_fmt = AV_SAMPLE_FMT_S16P;
+					break;
+				case cmn::AudioSample::Format::S32P:
+					sample_fmt = AV_SAMPLE_FMT_S32P;
+					break;
+				case cmn::AudioSample::Format::FltP:
+					sample_fmt = AV_SAMPLE_FMT_FLTP;
+					break;
+				case cmn::AudioSample::Format::DblP:
+					sample_fmt = AV_SAMPLE_FMT_DBLP;
+					break;
+				default:
+					sample_fmt = AV_SAMPLE_FMT_NONE;
 					break;
 			}
 
@@ -212,7 +254,7 @@ namespace ffmpeg
 			return nullptr;
 		}
 
-		static inline int64_t GetDurationPerFrame(cmn::MediaType media_type, std::shared_ptr<TranscodeContext>& context, AVFrame* frame = nullptr)
+		static inline int64_t GetDurationPerFrame(cmn::MediaType media_type, std::shared_ptr<MediaTrack>& context, AVFrame* frame = nullptr)
 		{
 			switch (media_type)
 			{
@@ -220,7 +262,7 @@ namespace ffmpeg
 					// Calculate duration using framerate in timebase
 					int den = context->GetTimeBase().GetDen();
 
-					// TODO(soulk) : If there is no framerate value, the frame rate value cannot be calculated normally.
+					// TODO(Keukhan) : If there is no framerate value, the frame rate value cannot be calculated normally.
 					int64_t duration = (den == 0) ? 0LL : (float)den / context->GetFrameRate();
 					return duration;
 				}
@@ -318,6 +360,13 @@ namespace ffmpeg
 			packet_buffer->SetPacketType(packet_type);
 
 			return packet_buffer;
+		}
+
+		static AVRational TimebaseToAVRational(const cmn::Timebase& timebase)
+		{
+			return (AVRational){
+				.num = timebase.GetNum(),
+				.den = timebase.GetDen()};
 		}
 	};
 

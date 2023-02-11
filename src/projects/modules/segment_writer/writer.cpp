@@ -198,7 +198,7 @@ bool Writer::FillCodecParameters(const std::shared_ptr<const Track> &track, AVCo
 			codec_parameters->bit_rate = media_track->GetBitrate();
 			codec_parameters->width = media_track->GetWidth();
 			codec_parameters->height = media_track->GetHeight();
-			codec_parameters->format = media_track->GetFormat();
+			codec_parameters->format = media_track->GetColorspace();
 			if (media_track->GetCodecId() == cmn::MediaCodecId::H265)
 			{
 				codec_parameters->codec_tag = MKTAG('h', 'v', 'c', '1');
@@ -795,6 +795,8 @@ bool Writer::WritePacket(const std::shared_ptr<const MediaPacket> &packet)
 		case cmn::BitstreamFormat::AAC_MPEG4_GENERIC:
 			[[fallthrough]];
 		case cmn::BitstreamFormat::OPUS_RTP_RFC_7587:
+			[[fallthrough]];
+		case cmn::BitstreamFormat::ID3v2:
 			[[fallthrough]];
 		case cmn::BitstreamFormat::PNG:
 			break;

@@ -15,7 +15,6 @@ RtpRtcp::RtpRtcp(const std::shared_ptr<RtpRtcpInterface> &observer)
 	        : ov::Node(NodeType::Rtp)
 {
 	_observer = observer;
-	_receiver_report_timer.Start();
 	_rtcp_send_stop_watch.Start();
 }
 
@@ -73,6 +72,15 @@ bool RtpRtcp::AddRtpReceiver(uint32_t track_id, const std::shared_ptr<MediaTrack
 			return false;
 	}
 
+	if (track->GetMediaType() == cmn::MediaType::Video)
+	{
+		_video_receiver_enabled = true;
+	}
+	else if (track->GetMediaType() == cmn::MediaType::Audio)
+	{
+		_audio_receiver_enabled = true;
+	}
+
 	return true;
 }
 
@@ -100,7 +108,7 @@ bool RtpRtcp::SendRtpPacket(const std::shared_ptr<RtpPacket> &rtp_packet)
     if(it != _rtcp_sr_generators.end())
     {
 		auto rtcp_sr_generator = it->second;
-		rtcp_sr_generator->AddRTPPacketAndGenerateRtcpSR(*rtp_packet);
+		rtcp_sr_generator->AddRTPPacketInfo(rtp_packet);
 	}
 
 	if(_rtcp_sent_count == 0 || _rtcp_send_stop_watch.Elapsed() > SDES_CYCLE_MS)
@@ -194,15 +202,22 @@ bool RtpRtcp::SendFIR(uint32_t media_ssrc)
 	return SendDataToNextNode(NodeType::Rtcp, rtcp_packet->GetData());
 }
 
-uint8_t RtpRtcp::GetReceivedPayloadType(uint32_t ssrc)
+bool RtpRtcp::IsTransportCcFeedbackEnabled() const
 {
-	auto stat_it = _receive_statistics.find(ssrc);
-	if(stat_it == _receive_statistics.end())
-	{
-		return 0;
-	}
+	return _transport_cc_feedback_enabled;
+}
 
-	return stat_it->second->GetPayloadType();
+bool RtpRtcp::EnableTransportCcFeedback(uint8_t extension_id)
+{
+	_transport_cc_feedback_extension_id = extension_id;
+	_transport_cc_feedback_enabled = true;
+
+	return true;
+}
+
+void RtpRtcp::DisableTransportCcFeedback()
+{
+	_transport_cc_feedback_enabled = false;
 }
 
 // In general, since RTP_RTCP is the first node, there is no previous node. So it will not be called
@@ -293,7 +308,6 @@ bool RtpRtcp::OnDataReceivedFromNextNode(NodeType from_node, const std::shared_p
 bool RtpRtcp::OnRtpReceived(NodeType from_node, const std::shared_ptr<const ov::Data> &data)
 {
 	auto packet = std::make_shared<RtpPacket>(data);
-	logtd("%s", packet->Dump().CStr());
 
 	uint32_t track_id = 0;
 	if(from_node == NodeType::Rtsp)
@@ -322,12 +336,14 @@ bool RtpRtcp::OnRtpReceived(NodeType from_node, const std::shared_ptr<const ov::
 	}
 	auto track = track_it->second;
 
+	// For RTCP Receiver Report
 	std::shared_ptr<RtpReceiveStatistics> stat;
 	auto stat_it = _receive_statistics.find(packet->Ssrc());
 	if(stat_it == _receive_statistics.end())
 	{
 		// First receive
-		stat = std::make_shared<RtpReceiveStatistics>(packet->PayloadType(), packet->Ssrc(), track->GetTimeBase().GetDen());
+		// Some encoders or servers do not provide SSRC in SDP. Therefore, after receiving the packet, the ssrc can be extracted and used.
+		stat = std::make_shared<RtpReceiveStatistics>(packet->Ssrc(), track->GetTimeBase().GetDen());
 		_receive_statistics.emplace(packet->Ssrc(), stat);
 	}
 	else
@@ -338,7 +354,7 @@ bool RtpRtcp::OnRtpReceived(NodeType from_node, const std::shared_ptr<const ov::
 	stat->AddReceivedRtpPacket(packet);
 
 	// Send ReceiverReport
-	if(stat->HasElapsedSinceLastReportBlock(RECEIVER_REPORT_CYCLE_MS))
+	if (stat->HasElapsedSinceLastReportBlock(RECEIVER_REPORT_CYCLE_MS) && stat->IsSenderReportReceived() == true)
 	{
 		auto report = std::make_shared<ReceiverReport>();
 		report->SetRtpSsrc(packet->Ssrc());
@@ -350,6 +366,34 @@ bool RtpRtcp::OnRtpReceived(NodeType from_node, const std::shared_ptr<const ov::
 		{
 			_last_sent_rtcp_packet = rtcp_packet;
 			SendDataToNextNode(NodeType::Rtcp, rtcp_packet->GetData());
+		}
+	}
+
+	// For Transport-wide CC feedback
+	if (_transport_cc_feedback_enabled == true)
+	{
+		if (_transport_cc_generator == nullptr)
+		{
+			// Since the Receiver SSRC is unknown, the same as the RR of the first track is used. Since it is a wide sequence, media ssrc may not be one. So this also just uses the first media ssrc.
+			_transport_cc_generator = std::make_shared<RtcpTransportCcFeedbackGenerator>(
+										_transport_cc_feedback_extension_id, 
+										stat->GetReceiverSSRC());
+		}
+
+		_transport_cc_generator->AddReceivedRtpPacket(packet);
+
+		// Send Transport-wide CC feedback
+		if ((_transport_cc_generator->HasElapsedSinceLastTransportCc(TRANSPORT_CC_CYCLE_MS)) && 
+			(_video_receiver_enabled ? (track->GetMediaType() == cmn::MediaType::Video && packet->Marker() == true) : true))
+		{
+			auto feedback = _transport_cc_generator->GenerateTransportCcMessage();
+			if (feedback != nullptr)
+			{
+				_last_sent_rtcp_packet = feedback;
+
+				auto feedback_data = feedback->GetData();
+				SendDataToNextNode(NodeType::Rtcp, feedback_data);
+			}
 		}
 	}
 
@@ -391,7 +435,7 @@ bool RtpRtcp::OnRtpReceived(NodeType from_node, const std::shared_ptr<const ov::
 			if(packet == nullptr)
 			{
 				// can not happen
-				logte("Could not get first rtp packet from jitter buffer - ssrc : %u", packet->Ssrc());
+				logtw("Could not get first rtp packet from jitter buffer - track(%u)", track_id);
 				return false;
 			}
 

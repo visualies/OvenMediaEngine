@@ -58,10 +58,6 @@ namespace ocst
 		bool UpdateVirtualHosts(const std::vector<info::Host> &host_list);
 		std::vector<std::shared_ptr<ocst::VirtualHost>> GetVirtualHostList();
 
-		// Process persistent origins settings. Executed when VirtualHost configuration is created or updated.		
-		void RequestProcessPersistOrigins();
-		void ProcessPersistOrigins();
-
 		/// Create an application and notify the modules
 		///
 		/// @param vhost_name A name of VirtualHost
@@ -118,6 +114,12 @@ namespace ocst
 			const info::VHostAppName &vhost_app_name, const ov::String &stream_name,
 			const ov::String &url, off_t offset);
 
+		bool RequestPullStream(
+			const std::shared_ptr<const ov::Url> &request_from,
+			const info::VHostAppName &vhost_app_name, const ov::String &stream_name,
+			const std::vector<ov::String> &url_list, off_t offset,
+			const std::shared_ptr<pvd::PullStreamProperties> &properties);
+
 		/// Pull a stream using specified URL
 		///
 		/// @param request_from Source from which RequestPullStream() invoked (Mainly provided when requested by Publisher)
@@ -155,10 +157,25 @@ namespace ocst
 			return RequestPullStream(request_from, vhost_app_name, stream_name, 0);
 		}
 
+		/// Release Pulled Stream
+		bool RequestReleasePulledStream(const info::VHostAppName &vhost_app_name, const ov::String &stream_name);
+
+		/// Find Provider from ProviderType
+		std::shared_ptr<pvd::Provider> GetProviderFromType(const ProviderType type);
 		/// Find Publisher from PublisehrType
 		std::shared_ptr<pub::Publisher> GetPublisherFromType(const PublisherType type);
 
+		// OriginMapStore
+		// key : <app/stream>
+		// value : ovt://host:port/<app/stream>
+		CommonErrorCode IsExistStreamInOriginMapStore(const info::VHostAppName &vhost_app_name, const ov::String &stream_name) const;
+		std::shared_ptr<ov::Url> GetOriginUrlFromOriginMapStore(const info::VHostAppName &vhost_app_name, const ov::String &stream_name) const;
+		CommonErrorCode RegisterStreamToOriginMapStore(const info::VHostAppName &vhost_app_name, const ov::String &stream_name);
+		CommonErrorCode UnregisterStreamFromOriginMapStore(const info::VHostAppName &vhost_app_name, const ov::String &stream_name);
 
+		// Persistent Stream
+		CommonErrorCode CreatePersistentStreamIfNeed(const info::Application &app_info, const std::shared_ptr<info::Stream> &stream_info);
+		
 		//--------------------------------------------------------------------
 		// Implementation of ocst::Application::CallbackInterface
 		//--------------------------------------------------------------------

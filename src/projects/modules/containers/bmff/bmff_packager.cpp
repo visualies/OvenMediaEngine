@@ -9,18 +9,25 @@
 
 #include "bmff_packager.h"
 #include "bmff_private.h"
-
+#include <modules/id3v2/id3v2.h>
+#include <modules/id3v2/frames/id3v2_frames.h>
 namespace bmff
 {
-	Packager::Packager(const std::shared_ptr<const MediaTrack> &track)
+	Packager::Packager(const std::shared_ptr<const MediaTrack> &media_track, const std::shared_ptr<const MediaTrack> &data_track)
 	{
-		_track = track;
+		_media_track = media_track;
+		_data_track = data_track;
 	}
 
 	// Get track 
-	const std::shared_ptr<const MediaTrack> &Packager::GetTrack() const
+	const std::shared_ptr<const MediaTrack> &Packager::GetMediaTrack() const
 	{
-		return _track;
+		return _media_track;
+	}
+
+	const std::shared_ptr<const MediaTrack> &Packager::GetDataTrack() const
+	{
+		return _data_track;
 	}
 
 	bool Packager::WriteFtypBox(ov::ByteStream &container_stream)
@@ -107,7 +114,7 @@ namespace bmff
 
 		stream.WriteBE32(0); // creation_time
 		stream.WriteBE32(0); // modification_time
-		stream.WriteBE32(GetTrack()->GetTimeBase().GetTimescale()); // timescale
+		stream.WriteBE32(GetMediaTrack()->GetTimeBase().GetTimescale()); // timescale
 		stream.WriteBE32(0); // duration
 		stream.WriteBE32(0x00010000); // rate
 		stream.WriteBE16(0x0100); // volume
@@ -196,7 +203,7 @@ namespace bmff
 
 		// track_ID is an integer that uniquely identifies this track over the entire life‐time of this presentation. Track IDs are never re-used and cannot be zero.
 		// track_ID + 1 because zero track ID is valid for OME
-		stream.WriteBE32(GetTrack()->GetId()+1); // track_ID
+		stream.WriteBE32(GetMediaTrack()->GetId()+1); // track_ID
 		stream.WriteBE32(0); // reserved
 		stream.WriteBE32(0); // duration
 		stream.WriteBE32(0); // reserved
@@ -204,7 +211,7 @@ namespace bmff
 		stream.WriteBE16(0); // layer
 		stream.WriteBE16(0); // alternate_group
 
-		if (GetTrack()->GetMediaType() == cmn::MediaType::Audio)
+		if (GetMediaTrack()->GetMediaType() == cmn::MediaType::Audio)
 		{
 			stream.WriteBE16(0x0100); // volume
 		}
@@ -222,8 +229,8 @@ namespace bmff
 
 		// Width and height
 		// [ISO/IEC 14496-12 8.5.3] specify the track's visual presentation size as fixed-point 16.16 values. 
-		stream.WriteBE32(_track->GetWidth() << 16);
-		stream.WriteBE32(_track->GetHeight() << 16);
+		stream.WriteBE32(_media_track->GetWidth() << 16);
+		stream.WriteBE32(_media_track->GetHeight() << 16);
 
 		//[ISO/IEC 14496-12 8.5.1] The default value of the track header flags for media tracks is 7 (track_enabled, track_in_movie, track_in_preview). 
 		return WriteFullBox(container_stream, "tkhd", *stream.GetData(), 0, 7);
@@ -290,7 +297,7 @@ namespace bmff
 
 		stream.WriteBE32(0); // creation_time
 		stream.WriteBE32(0); // modification_time
-		stream.WriteBE32(_track->GetTimeBase().GetTimescale()); // timescale
+		stream.WriteBE32(_media_track->GetTimeBase().GetTimescale()); // timescale
 		stream.WriteBE32(0); // duration
 
 		// language
@@ -326,11 +333,11 @@ namespace bmff
 		stream.WriteBE32(0); // pre_defined
 
 		// handler_type
-		if (GetTrack()->GetMediaType() == cmn::MediaType::Video)
+		if (GetMediaTrack()->GetMediaType() == cmn::MediaType::Video)
 		{
 			stream.WriteText("vide");
 		}
-		else if (GetTrack()->GetMediaType() == cmn::MediaType::Audio)
+		else if (GetMediaTrack()->GetMediaType() == cmn::MediaType::Audio)
 		{
 			stream.WriteText("soun");
 		}
@@ -348,7 +355,7 @@ namespace bmff
 		// [ISO/IEC 14496-12 8.9.3] 
 		// name is a null-terminated string in UTF-8 characters which gives a human-readable name for the track
 		// type (for debugging and inspection purposes). 		
-		stream.WriteText(StringFromMediaType(GetTrack()->GetMediaType()), true);
+		stream.WriteText(StringFromMediaType(GetMediaTrack()->GetMediaType()), true);
 
 		return WriteFullBox(container_stream, "hdlr", *stream.GetData(), 0, 0);
 	}
@@ -376,7 +383,7 @@ namespace bmff
 		// }
 
 		ov::ByteStream stream(4096);
-		if (GetTrack()->GetMediaType() == cmn::MediaType::Video)
+		if (GetMediaTrack()->GetMediaType() == cmn::MediaType::Video)
 		{
 			if (WriteVmhdBox(stream) == false)
 			{
@@ -384,7 +391,7 @@ namespace bmff
 				return false;
 			}
 		}
-		else if (GetTrack()->GetMediaType() == cmn::MediaType::Audio)
+		else if (GetMediaTrack()->GetMediaType() == cmn::MediaType::Audio)
 		{
 			if (WriteSmhdBox(stream) == false)
 			{
@@ -596,7 +603,7 @@ namespace bmff
 		// entry_count
 		stream.WriteBE32(1);
 
-		if (GetTrack()->GetCodecId() == cmn::MediaCodecId::H264)
+		if (GetMediaTrack()->GetCodecId() == cmn::MediaCodecId::H264)
 		{
 			if (WriteAvc1Box(stream) == false)
 			{
@@ -604,7 +611,7 @@ namespace bmff
 				return false;
 			}
 		}
-		else if (GetTrack()->GetCodecId() == cmn::MediaCodecId::Aac)
+		else if (GetMediaTrack()->GetCodecId() == cmn::MediaCodecId::Aac)
 		{
 			if (WriteMp4aBox(stream) == false)
 			{
@@ -683,9 +690,9 @@ namespace bmff
 		}
 
 		// Width int(16)
-		stream.WriteBE16(GetTrack()->GetWidth());
+		stream.WriteBE16(GetMediaTrack()->GetWidth());
 		// Height int(16)
-		stream.WriteBE16(GetTrack()->GetHeight());
+		stream.WriteBE16(GetMediaTrack()->GetHeight());
 		// Horizontal resolution int(32)
 		stream.WriteBE32(0x00480000);
 		// Vertical resolution int(32)
@@ -782,8 +789,8 @@ namespace bmff
 		// configurationVersion int(8)
 		stream.Write8(1);
 
-		auto sps_data = GetTrack()->GetH264SpsData();
-		auto pps_data = GetTrack()->GetH264PpsData();
+		auto sps_data = GetMediaTrack()->GetH264SpsData();
+		auto pps_data = GetMediaTrack()->GetH264PpsData();
 
 		if (sps_data == nullptr || pps_data == nullptr)
 		{
@@ -890,7 +897,7 @@ namespace bmff
 		}
 
 		// uint(16) channelcount = 2;
-		stream.WriteBE16(GetTrack()->GetChannel().GetCounts());
+		stream.WriteBE16(GetMediaTrack()->GetChannel().GetCounts());
 		// uint(16) samplesize = 16;
 		stream.WriteBE16(16);
 		// uint(16) pre_defined = 0;
@@ -898,7 +905,7 @@ namespace bmff
 		// uint(16) reserved = 0;
 		stream.WriteBE16(0); // nl
 		// uint(32) samplerate = {default samplerate of media} << 16;
-		stream.WriteBE32(GetTrack()->GetSampleRate() << 16);
+		stream.WriteBE32(GetMediaTrack()->GetSampleRate() << 16);
 
 		if (WriteEsdsBox(stream) == false)
 		{
@@ -994,7 +1001,7 @@ namespace bmff
 		ov::ByteStream stream(4096);
 
 		// uint(16) ES_ID;
-		stream.WriteBE16(GetTrack()->GetId()+1);
+		stream.WriteBE16(GetMediaTrack()->GetId()+1);
 		// bit(1) streamDependenceFlag; disabled
 		// bit(1) URL_Flag; disabled
 		// bit(1) OCRstreamFlag; disabled
@@ -1036,7 +1043,7 @@ namespace bmff
 		ov::ByteStream stream(4096);
 
 		// uint(8) objectTypeIndication;
-		if (GetTrack()->GetCodecId() == cmn::MediaCodecId::Aac)
+		if (GetMediaTrack()->GetCodecId() == cmn::MediaCodecId::Aac)
 		{
 			stream.Write8(0x40); // Audio ISO/IEC 14496-3
 		}
@@ -1055,10 +1062,10 @@ namespace bmff
 		stream.WriteBE24(0);
 
 		// bit(32) maxBitrate;
-		stream.WriteBE32(GetTrack()->GetBitrate());
+		stream.WriteBE32(GetMediaTrack()->GetBitrate());
 
 		// bit(32) avgBitrate;
-		stream.WriteBE32(GetTrack()->GetBitrate());
+		stream.WriteBE32(GetMediaTrack()->GetBitrate());
 
 		// DecoderSpecificInfo decSpecificInfo[0..1];
 		if (WriteAudioSpecificInfo(stream) == false)
@@ -1107,7 +1114,7 @@ namespace bmff
 		// uint(4) samplingFrequencyIndex; [0] 96000 [1] 88200 [2] 64000 [3] 48000 [4] 44100 [5] 32000 [6] 24000 [7] 22050 [8] 16000 [9] 12000 [10] 11025 [11] 8000 [12] 7350 
 		// uint(4) channelConfiguration; 
 
-		auto aac_config = GetTrack()->GetAacConfig();
+		auto aac_config = GetMediaTrack()->GetAacConfig();
 		if (aac_config == nullptr)
 		{
 			return false;
@@ -1302,7 +1309,7 @@ namespace bmff
 		ov::ByteStream stream(24);
 
 		// unsigned int(32) track_ID;
-		stream.WriteBE32(GetTrack()->GetId()+1);
+		stream.WriteBE32(GetMediaTrack()->GetId()+1);
 
 		// unsigned int(32) default_sample_description_index;
 		stream.WriteBE32(1);
@@ -1327,12 +1334,101 @@ namespace bmff
 		return WriteFullBox(container_stream, "trex", *stream.GetData(), 0, 0);
 	}
 
+	bool Packager::WriteEmsgBox(ov::ByteStream &container_stream, const std::shared_ptr<const Samples> &samples)
+	{
+		// aligned(8) class DASHEventMessageBox extends FullBox('emsg', version, flags=0){
+		// 	if (version==0) {
+		// 		string scheme_id_uri;
+		// 		string value;
+		// 		unsigned int(32) timescale;
+		// 		unsigned int(32) presentation_time_delta;
+		// 		unsigned int(32) event_duration;
+		// 		unsigned int(32) id;
+		// 	} else if (version==1) {
+		// 		unsigned int(32) timescale;
+		// 		unsigned int(64) presentation_time;
+		// 		unsigned int(32) event_duration;
+		// 		unsigned int(32) id;
+		// 		string scheme_id_uri;
+		// 		string value;
+		// 	}
+		// 	unsigned int(8) message_data[];
+		// }
+
+		// scheme_id_uri: is a null-terminated ('C') string in UTF-8 characters that identifies the message
+		// scheme. The semantics and syntax of the message_data[] are defined by the owner of the scheme
+		// identified. 
+
+		// value: is a null-terminated ('C') string in UTF-8 characters that specifies the value for the event. The
+		// value space and semantics must be defined by the owners of the scheme identified in the scheme_id_
+		// uri field.
+
+		// timescale provides the timescale, in ticks per second, for the time delta and duration fields within
+		// version 0 of this box.
+
+		// presentation_time_delta provides the Media Presentation time delta of the media presentation
+		// time of the event and the earliest presentation time in this segment.
+
+		// event_duration provides the duration of event in media presentation time. In version 0-, the
+		// timescale is indicated in the timescale field; in version 1, the timescale of the MovieHeaderBox is
+		// used. The value 0xFFFF indicates an unknown duration.
+
+		// id: a field identifying this instance of the message. Messages with equivalent semantics shall have
+		// the same value, i.e. processing of any one event message box with the same id is sufficient.
+
+		// message_data: body of the message, which fills the remainder of the message box. This may be empty
+		// depending on the above information. The syntax and semantics of this field must be defined by the
+		// owner of the scheme identified in the scheme_id_uri field.
+
+		static uint32_t seq = 0;
+
+		for (const auto &sample : samples->GetList())
+		{
+			ov::ByteStream stream(512);
+			
+			// version == 1
+
+			// timescale of data packet is always 1000
+			stream.WriteBE32(GetDataTrack()->GetTimeBase().GetTimescale());
+
+			// presentation_time
+			stream.WriteBE64(sample->GetPts());
+
+			// event_duration
+			stream.WriteBE32(0xFFFFFFFF);
+
+			// id
+			stream.WriteBE32(seq++);
+
+			// scheme_id_uri
+			// now only support ID3v2 (https://aomediacodec.github.io/id3-emsg/)
+			stream.WriteText("https://aomedia.org/emsg/ID3", true);
+
+			// value
+			stream.WriteText("OvenMediaEngine", true);
+
+			// message_data
+			stream.Write(sample->GetData());
+
+			// One or more Event Message boxes (‘emsg’) [CMAF] can be included per segment. Version 1 of the Event Message box [DASH] must be used.
+			if (WriteFullBox(container_stream, "emsg", *stream.GetData(), 1, 0) == false)
+			{
+				logtw("Failed to write emsg box");
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	bool Packager::WriteMoofBox(ov::ByteStream &container_stream, const std::shared_ptr<const Samples> &samples)
 	{
 		// ISO/IEC 14496-12 8.8.4
 		// aligned(8) class MovieFragmentBox extends Box(‘moof’)
 		// {
 		// }
+
+		auto start_offset = container_stream.GetLength();
 
 		if (samples->IsEmpty() == true)
 		{
@@ -1371,7 +1467,7 @@ namespace bmff
 		auto p = container->GetWritableDataAs<uint8_t>();
 		auto pos = container_stream.GetLength() - _last_trun_box_size + BMFF_FULL_BOX_HEADER_SIZE + 4;
 
-		ByteWriter<uint32_t>::WriteBigEndian(p + pos, container_stream.GetLength() + BMFF_BOX_HEADER_SIZE /* mdat header size */);
+		ByteWriter<uint32_t>::WriteBigEndian(p + pos, container_stream.GetLength() - start_offset + BMFF_BOX_HEADER_SIZE /* mdat header size */);
 
 		return true;
 	}
@@ -1439,7 +1535,7 @@ namespace bmff
 		ov::ByteStream stream(64);
 
 		// unsigned int(32) track_ID;
-		stream.WriteBE32(GetTrack()->GetId()+1);
+		stream.WriteBE32(GetMediaTrack()->GetId()+1);
 
 		// unsigned int(64) base_data_offset;
 
@@ -1533,7 +1629,7 @@ namespace bmff
 		// 0x000800 sample-composition-time-offsets-present; each sample has a composition time offset (e.g. as used for I/P/B video in MPEG).
 
 		uint32_t tr_flags;
-		if (GetTrack()->GetMediaType() == cmn::MediaType::Video)
+		if (GetMediaTrack()->GetMediaType() == cmn::MediaType::Video)
 		{
 			tr_flags = 0x000001 | 0x000100 | 0x000200 | 0x000400 | 0x000800;
 		}
@@ -1566,7 +1662,7 @@ namespace bmff
 			// unsigned int(32) sample_duration;
 			stream.WriteBE32(sample->GetDuration());
 
-			if (GetTrack()->GetMediaType() == cmn::MediaType::Video)
+			if (GetMediaTrack()->GetMediaType() == cmn::MediaType::Video)
 			{
 				// unsigned int(32) sample_size;
 				stream.WriteBE32(sample->GetData()->GetLength());
@@ -1589,7 +1685,7 @@ namespace bmff
 		// it is used to find the position of the data_offset of the trun box in reverse.
 		_last_trun_box_size = BMFF_FULL_BOX_HEADER_SIZE + stream.GetOffset();
 
-		uint8_t version = GetTrack()->GetMediaType() == cmn::MediaType::Video ? 1 : 0;
+		uint8_t version = GetMediaTrack()->GetMediaType() == cmn::MediaType::Video ? 1 : 0;
 
 		return WriteFullBox(container_stream, "trun", *stream.GetData(), version, tr_flags);
 	}

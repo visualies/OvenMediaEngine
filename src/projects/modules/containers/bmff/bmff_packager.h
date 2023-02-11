@@ -31,13 +31,14 @@ namespace bmff
 
 				if (_list.size() == 0)
 				{
-					_start_timestamp = media_packet->GetPts();
+					_start_timestamp = media_packet->GetDts();
+					if (media_packet->GetFlag() == MediaPacketFlag::Key)
+					{
+						_independent = true;
+					}
 				}
 
-				if (media_packet->GetFlag() == MediaPacketFlag::Key)
-				{
-					_independent = true;
-				}
+				_end_timestamp = media_packet->GetDts() + media_packet->GetDuration();
 
 				_list.push_back(media_packet);
 
@@ -60,10 +61,21 @@ namespace bmff
 				return _list.at(index);
 			}
 
+			void PopFront()
+			{
+				_list.erase(_list.begin());
+			}
+
 			// Get Start Timestamp
-			uint64_t GetStartTimestamp() const
+			int64_t GetStartTimestamp() const
 			{
 				return _start_timestamp;
+			}
+
+			// Get End Timestamp
+			int64_t GetEndTimestamp() const
+			{
+				return _end_timestamp;
 			}
 
 			// Get Total Duration
@@ -98,18 +110,20 @@ namespace bmff
 
 		private:
 			std::vector<std::shared_ptr<const MediaPacket>> _list;
-			uint64_t _start_timestamp = 0;
+			int64_t _start_timestamp = 0;
+			int64_t _end_timestamp = 0;
 			double _total_duration = 0.0;
 			uint64_t _total_size = 0;
 			uint32_t _total_count = 0;
 			bool _independent = false;
 		};
 
-		Packager(const std::shared_ptr<const MediaTrack> &track);
+		Packager(const std::shared_ptr<const MediaTrack> &media_track, const std::shared_ptr<const MediaTrack> &data_track);
 
 	protected:
 		// Get track 
-		const std::shared_ptr<const MediaTrack> &GetTrack() const;
+		const std::shared_ptr<const MediaTrack> &GetMediaTrack() const;
+		const std::shared_ptr<const MediaTrack> &GetDataTrack() const;
 
 		// Fytp Box
 		virtual bool WriteFtypBox(ov::ByteStream &container_stream);
@@ -148,6 +162,9 @@ namespace bmff
 		virtual bool WriteMvexBox(ov::ByteStream &container_stream);
 		virtual bool WriteTrexBox(ov::ByteStream &container_stream);
 
+		// Emsg Box
+		virtual bool WriteEmsgBox(ov::ByteStream &container_stream, const std::shared_ptr<const Samples> &samples);
+
 		// Moof Box Gourp
 		virtual bool WriteMoofBox(ov::ByteStream &container_stream, const std::shared_ptr<const Samples> &samples);
 		virtual bool WriteMfhdBox(ov::ByteStream &container_stream, const std::shared_ptr<const Samples> &samples);
@@ -167,7 +184,9 @@ namespace bmff
 		bool WriteFullBox(ov::ByteStream &stream, const ov::String &box_name, const ov::Data &box_data, uint8_t version, uint32_t flags);
 		
 	private:
-		std::shared_ptr<const MediaTrack> _track;
+		std::shared_ptr<const MediaTrack> _media_track = nullptr;
+		std::shared_ptr<const MediaTrack> _data_track = nullptr;
+
 		uint32_t _sequence_number = 1; // For Mfhd Box
 
 		// Trun box size

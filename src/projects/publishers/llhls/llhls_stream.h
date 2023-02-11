@@ -10,11 +10,20 @@
 
 #include <base/common_types.h>
 #include <base/publisher/stream.h>
+#include <base/info/dump.h>
+#include <modules/dump/dump.h>
+
 #include "monitoring/monitoring.h"
 
 #include "modules/containers/bmff/fmp4_packager/fmp4_packager.h"
 #include "llhls_master_playlist.h"
 #include "llhls_chunklist.h"
+
+#define DEFAULT_PLAYLIST_NAME	"llhls.m3u8"
+
+
+// max initial media packet buffer size, for OOM protection
+#define MAX_INITIAL_MEDIA_PACKET_BUFFER_SIZE		10000
 
 class LLHlsStream : public pub::Stream, public bmff::FMp4StorageObserver
 {
@@ -28,6 +37,7 @@ public:
 
 	void SendVideoFrame(const std::shared_ptr<MediaPacket> &media_packet) override;
 	void SendAudioFrame(const std::shared_ptr<MediaPacket> &media_packet) override;
+	void SendDataFrame(const std::shared_ptr<MediaPacket> &media_packet) override;
 
 	enum class RequestResult : uint8_t
 	{
@@ -53,12 +63,22 @@ public:
 	
 	const ov::String &GetStreamKey() const;
 
-	std::tuple<RequestResult, std::shared_ptr<const ov::Data>> GetPlaylist(const ov::String &chunk_query_string, bool gzip=false) const;
-	std::tuple<RequestResult, std::shared_ptr<const ov::Data>> GetChunklist(const ov::String &chunk_query_string, const int32_t &track_id, int64_t msn, int64_t psn, bool skip = false, bool gzip=false) const;
+	uint64_t GetMaxChunkDurationMS() const;
+
+	std::tuple<RequestResult, std::shared_ptr<const ov::Data>> GetMasterPlaylist(const ov::String &file_name, const ov::String &chunk_query_string, bool gzip, bool legacy, bool include_path=true);
+	std::tuple<RequestResult, std::shared_ptr<const ov::Data>> GetChunklist(const ov::String &chunk_query_string, const int32_t &track_id, int64_t msn, int64_t psn, bool skip, bool gzip, bool legacy) const;
 	std::tuple<RequestResult, std::shared_ptr<ov::Data>> GetInitializationSegment(const int32_t &track_id) const;
 	std::tuple<RequestResult, std::shared_ptr<ov::Data>> GetSegment(const int32_t &track_id, const int64_t &segment_number) const;
 	std::tuple<RequestResult, std::shared_ptr<ov::Data>> GetChunk(const int32_t &track_id, const int64_t &segment_number, const int64_t &chunk_number) const;
-	
+
+	// <result, error message>
+	std::tuple<bool, ov::String> StartDump(const std::shared_ptr<info::Dump> &dump_info);
+	std::tuple<bool, ov::String> StopDump(const std::shared_ptr<info::Dump> &dump_info);
+	// Get dump info
+	std::shared_ptr<const mdl::Dump> GetDumpInfo(const ov::String &dump_id);
+	// Get dumps
+	std::vector<std::shared_ptr<const mdl::Dump>> GetDumpInfoList();
+
 private:
 	bool Start() override;
 	bool Stop() override;
@@ -69,9 +89,11 @@ private:
 	void OnFMp4StorageInitialized(const int32_t &track_id) override;
 	void OnMediaSegmentUpdated(const int32_t &track_id, const uint32_t &segment_number) override;
 	void OnMediaChunkUpdated(const int32_t &track_id, const uint32_t &segment_number, const uint32_t &chunk_number) override;
+	void OnMediaSegmentDeleted(const int32_t &track_id, const uint32_t &segment_number) override;
 
 	// Create and Get fMP4 packager and storage with track info, storage and packager_config
-	bool AddPackager(const std::shared_ptr<const MediaTrack> &track);
+	bool AddPackager(const std::shared_ptr<const MediaTrack> &media_track, const std::shared_ptr<const MediaTrack> &data_track);
+
 	// Get fMP4 packager with the track id
 	std::shared_ptr<bmff::FMP4Packager> GetPackager(const int32_t &track_id) const;
 	// Get storage with the track id
@@ -79,21 +101,30 @@ private:
 	// Get Playlist with the track id
 	std::shared_ptr<LLHlsChunklist> GetChunklistWriter(const int32_t &track_id) const;
 
-	// Add X-MEDIA to the master playlist
-	void AddMediaCandidateToMasterPlaylist(const std::shared_ptr<const MediaTrack> &track);
-	// Add X-STREAM-INF to the master playlist
-	void AddStreamInfToMasterPlaylist(const std::shared_ptr<const MediaTrack> &video_track, const std::shared_ptr<const MediaTrack> &audio_track);
+	std::shared_ptr<LLHlsMasterPlaylist> CreateMasterPlaylist(const std::shared_ptr<const info::Playlist> &playlist) const;
 
-	ov::String GetPlaylistName();
-	ov::String GetChunklistName(const int32_t &track_id);
-	ov::String GetIntializationSegmentName(const int32_t &track_id);
-	ov::String GetSegmentName(const int32_t &track_id, const int64_t &segment_number);
-	ov::String GetPartialSegmentName(const int32_t &track_id, const int64_t &segment_number, const int64_t &partial_number);
-	ov::String GetNextPartialSegmentName(const int32_t &track_id, const int64_t &segment_number, const int64_t &partial_number);
+	ov::String GetChunklistName(const int32_t &track_id) const;
+	ov::String GetIntializationSegmentName(const int32_t &track_id) const;
+	ov::String GetSegmentName(const int32_t &track_id, const int64_t &segment_number) const;
+	ov::String GetPartialSegmentName(const int32_t &track_id, const int64_t &segment_number, const int64_t &partial_number) const;
+	ov::String GetNextPartialSegmentName(const int32_t &track_id, const int64_t &segment_number, const int64_t &partial_number) const;
 
 	bool AppendMediaPacket(const std::shared_ptr<MediaPacket> &media_packet);
 
-	void CheckPlaylistReady();
+	bool IsReadyToPlay() const;
+	bool CheckPlaylistReady();
+
+	void DumpMasterPlaylistsOfAllItems();
+	bool DumpMasterPlaylist(const std::shared_ptr<mdl::Dump> &item);
+	void DumpInitSegmentOfAllItems(const int32_t &track_id);
+	bool DumpInitSegment(const std::shared_ptr<mdl::Dump> &item, const int32_t &track_id);
+	void DumpSegmentOfAllItems(const int32_t &track_id, const uint32_t &segment_number);
+	bool DumpSegment(const std::shared_ptr<mdl::Dump> &item, const int32_t &track_id, const int64_t &segment_number);
+
+	bool DumpData(const std::shared_ptr<mdl::Dump> &item, const ov::String &file_name, const std::shared_ptr<const ov::Data> &data);
+
+	int64_t GetMinimumLastSegmentNumber() const;
+	bool StopToSaveOldSegmentsInfo();
 
 	// Config
 	bmff::FMP4Packager::Config _packager_config;
@@ -110,12 +141,24 @@ private:
 	uint64_t _max_chunk_duration_ms = 0;
 	uint64_t _min_chunk_duration_ms = std::numeric_limits<uint64_t>::max();
 
-	LLHlsMasterPlaylist _master_playlist;
-	bool _playlist_ready = false;
+	double _configured_part_hold_back = 0;
 
+	std::map<ov::String, std::shared_ptr<LLHlsMasterPlaylist>> _master_playlists;
+	std::mutex _master_playlists_lock;
+
+	bool _playlist_ready = false;
+	mutable std::shared_mutex _playlist_ready_lock;
+
+	// Reserve
+	void BufferMediaPacketUntilReadyToPlay(const std::shared_ptr<MediaPacket> &media_packet);
+	bool SendBufferedPackets();
 	ov::Queue<std::shared_ptr<MediaPacket>> _initial_media_packet_buffer;
 
+	bool _origin_mode = false;
 	ov::String _stream_key;
 
 	uint32_t _worker_count = 0;
+
+	std::map<ov::String, std::shared_ptr<mdl::Dump>> _dumps;
+	std::shared_mutex _dumps_lock;
 };

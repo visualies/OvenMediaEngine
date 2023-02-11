@@ -24,14 +24,14 @@ namespace pvd
 	class WebRTCStream : public pvd::PushStream, public RtpRtcpInterface, public ov::Node
 	{
 	public:
-		static std::shared_ptr<WebRTCStream> Create(StreamSourceType source_type, ov::String stream_name, uint32_t stream_id, 
+		static std::shared_ptr<WebRTCStream> Create(StreamSourceType source_type, ov::String stream_name,
 													const std::shared_ptr<PushProvider> &provider,
 													const std::shared_ptr<const SessionDescription> &offer_sdp,
 													const std::shared_ptr<const SessionDescription> &peer_sdp,
 													const std::shared_ptr<Certificate> &certificate, 
 													const std::shared_ptr<IcePort> &ice_port);
 		
-		explicit WebRTCStream(StreamSourceType source_type, ov::String stream_name, uint32_t stream_id, 
+		explicit WebRTCStream(StreamSourceType source_type, ov::String stream_name, 
 								const std::shared_ptr<PushProvider> &provider,
 								const std::shared_ptr<const SessionDescription> &offer_sdp,
 								const std::shared_ptr<const SessionDescription> &peer_sdp,
@@ -84,5 +84,8 @@ namespace pvd
 		std::map<uint8_t, std::shared_ptr<RtpDepacketizingManager>> _depacketizers;
 
 		LipSyncClock 						_lip_sync_clock;
+
+		std::shared_ptr<ov::Data> _h264_extradata_nalu = nullptr;
+		bool _sent_sequence_header = false;
 	};
 }

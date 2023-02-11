@@ -23,7 +23,11 @@ public:
 		return AV_CODEC_ID_H265;
 	}
 
-	bool Configure(std::shared_ptr<TranscodeContext> context) override;
+	bool Configure(std::shared_ptr<MediaTrack> context) override;
+
+	bool InitCodec();
+
+	void UninitCodec();
 
 	void CodecThread() override;
 };

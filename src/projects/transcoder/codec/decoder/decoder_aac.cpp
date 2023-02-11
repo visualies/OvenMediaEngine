@@ -11,14 +11,14 @@
 #include "../../transcoder_private.h"
 #include "base/info/application.h"
 
-bool DecoderAAC::Configure(std::shared_ptr<TranscodeContext> context)
+bool DecoderAAC::Configure(std::shared_ptr<MediaTrack> context)
 {
 	if (TranscodeDecoder::Configure(context) == false)
 	{
 		return false;
 	}
 
-	AVCodec *_codec = ::avcodec_find_decoder(GetCodecID());
+	const AVCodec *_codec = ::avcodec_find_decoder(GetCodecID());
 	if (_codec == nullptr)
 	{
 		logte("Codec not found: %s (%d)", ::avcodec_get_name(GetCodecID()), GetCodecID());
@@ -32,7 +32,7 @@ bool DecoderAAC::Configure(std::shared_ptr<TranscodeContext> context)
 		return false;
 	}
 
-	_context->time_base = TimebaseToAVRational(GetTimebase());
+	_context->time_base = ffmpeg::Conv::TimebaseToAVRational(GetTimebase());
 
 	if (::avcodec_open2(_context, _codec, nullptr) < 0)
 	{
@@ -218,7 +218,7 @@ void DecoderAAC::CodecThread()
 				{
 					auto codec_info = ShowCodecParameters(_context, _codec_par);
 
-					logti("[%s/%s(%u)] input stream information: %s",
+					logti("[%s/%s(%u)] input track information: %s",
 						  _stream_info.GetApplicationInfo().GetName().CStr(), _stream_info.GetName().CStr(), _stream_info.GetId(), codec_info.CStr());
 
 					_change_format = true;
@@ -233,10 +233,17 @@ void DecoderAAC::CodecThread()
 			}
 
 			// If there is no duration, the duration is calculated by timebase.
-			_frame->pkt_duration = (_frame->pkt_duration <= 0LL) ? ffmpeg::Conv::GetDurationPerFrame(cmn::MediaType::Audio, _input_context, _frame) : _frame->pkt_duration;
+			if (_frame->pkt_duration <= 0LL)
+			{
+				_frame->pkt_duration = ffmpeg::Conv::GetDurationPerFrame(cmn::MediaType::Audio, GetRefTrack(), _frame);
+			}
+
 
 			// If the decoded audio frame does not have a PTS, Increase frame duration time in PTS of previous frame
-			_frame->pts = (_frame->pts == AV_NOPTS_VALUE) ? (_last_pkt_pts + _frame->pkt_duration) : _frame->pts;
+			if(_frame->pts == AV_NOPTS_VALUE)
+			{
+				_frame->pts = _last_pkt_pts + _frame->pkt_duration;
+			}
 
 			auto output_frame = ffmpeg::Conv::ToMediaFrame(cmn::MediaType::Audio, _frame);
 			::av_frame_unref(_frame);
@@ -247,7 +254,7 @@ void DecoderAAC::CodecThread()
 
 			_last_pkt_pts = output_frame->GetPts();
 
-			SendOutputBuffer(need_to_change_notify, _track_id, std::move(output_frame));
+			SendOutputBuffer(need_to_change_notify ? TranscodeResult::FormatChanged : TranscodeResult::DataReady, std::move(output_frame));
 		}
 	}
 }

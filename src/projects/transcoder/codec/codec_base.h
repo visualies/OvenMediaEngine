@@ -17,6 +17,9 @@ extern "C"
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
+#include <libavutil/samplefmt.h>
+#include <libavutil/channel_layout.h>
+#include <libavutil/cpu.h>
 }
 
 #include <base/mediarouter/media_buffer.h>
@@ -55,30 +58,10 @@ public:
 
 	virtual AVCodecID GetCodecID() const noexcept = 0;
 
-	virtual bool Configure(std::shared_ptr<TranscodeContext> context) = 0;
+	virtual bool Configure(std::shared_ptr<MediaTrack> track) = 0;
 
 	virtual void SendBuffer(std::shared_ptr<const InputType> buf) = 0;
 
-	virtual std::shared_ptr<OutputType> RecvBuffer(TranscodeResult *result) = 0;
-
-	static AVRational TimebaseToAVRational(const cmn::Timebase &timebase)
-	{
-		return (AVRational){
-			.num = timebase.GetNum(),
-			.den = timebase.GetDen()};
-	}
-
-	uint32_t GetInputBufferSize()
-	{
-		return _input_buffer.Size();
-	}
-
-	uint32_t GetOutputBufferSize()
-	{
-		return _output_buffer.Size();
-	}
-
 protected:
 	ov::Queue<std::shared_ptr<const InputType>> _input_buffer;
-	ov::Queue<std::shared_ptr<OutputType>> _output_buffer;
 };

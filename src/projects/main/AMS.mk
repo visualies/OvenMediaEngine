@@ -28,6 +28,7 @@ LOCAL_STATIC_LIBRARIES := \
 	dtls_srtp \
 	rtp_rtcp \
 	sdp \
+	id3v2 \
 	segment_writer \
 	web_console \
 	mediarouter \
@@ -35,6 +36,7 @@ LOCAL_STATIC_LIBRARIES := \
 	jitter_buffer \
 	ovt_packetizer \
 	orchestrator \
+	origin_map_client \
 	publisher \
 	application \
 	access_controller \
@@ -46,6 +48,7 @@ LOCAL_STATIC_LIBRARIES := \
 	monitoring \
 	jsoncpp \
 	file \
+	dump \
 	rtmp \
 	file_provider \
 
@@ -73,12 +76,12 @@ $(call add_pkg_config,vpx)
 $(call add_pkg_config,opus)
 $(call add_pkg_config,libsrtp2)
 $(call add_pkg_config,libpcre2-8)
+$(call add_pkg_config,hiredis)
 
-# Temporarily stop using JEMALLOC. We will test it more and use it again.
-#ifeq ($(MAKECMDGOALS),release)
-	# Enable jemalloc 
-	# $(call add_pkg_config,jemalloc)
-#endif
+# Enable jemalloc 
+ifeq ($(MAKECMDGOALS),release)
+$(call add_pkg_config,jemalloc)
+endif
 
 LOCAL_TARGET := OvenMediaEngine
 

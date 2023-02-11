@@ -408,4 +408,21 @@ namespace ov
 
 		return seconds + frac;
 	}
+
+	uint32_t Converter::ToSynchSafe(uint32_t value)
+	{
+		unsigned int a, b, c, d, x_final = 0x0;
+
+		a = value & 0x7f;
+		b = (value >> 7) & 0x7f;
+		c = (value >> 14) & 0x7f;
+		d = (value >> 21) & 0x7f;
+
+		x_final = x_final | a;
+		x_final = x_final | (b << 8);
+		x_final = x_final | (c << 16);
+		x_final = x_final | (d << 24);
+
+		return x_final;
+	}
 }  // namespace ov

@@ -16,6 +16,9 @@
 #include <modules/containers/flv/flv_parser.h>
 #include <orchestrator/orchestrator.h>
 
+#include <modules/id3v2/id3v2.h>
+#include <modules/id3v2/frames/id3v2_frames.h>
+
 #include "base/info/application.h"
 #include "base/provider/push_provider/application.h"
 #include "base/provider/push_provider/provider.h"
@@ -1108,8 +1111,161 @@ namespace pvd
 		}
 		else
 		{
-			logtw("Unknown Amf0DataMessage - Message(%s)", message_name.CStr());
-			return;
+			// Find it in Events
+			if (CheckEventMessage(message->header, document) == false)
+			{
+				logtw("Unknown Amf0DataMessage - Message(%s / %s)", message_name.CStr(), data_name.CStr());
+				return;
+			}
+		}
+	}
+
+	bool RtmpStream::CheckEventMessage(const std::shared_ptr<const RtmpChunkHeader> &header, AmfDocument &document)
+	{
+		bool found = false;
+		
+		for (const auto &event : _event_generator.GetEvents())
+		{
+			auto trigger = event.GetTrigger();
+			auto trigger_list = trigger.Split(".");
+
+			// Trigger length must be 3 or more
+			// AMFDataMessage.[<Property>.<Property>...<Property>.]<Object Name>.<Key Name>
+			if (trigger_list.size() < 3)
+			{
+				logtd("Invalid trigger: %s", trigger.CStr());
+				continue;
+			}
+
+			if (header->completed.type_id == RTMP_MSGID_AMF0_DATA_MESSAGE && trigger_list.at(0) == "AMFDataMessage")
+			{
+				for (std::size_t i=1; i<trigger_list.size(); i++)
+				{
+					auto property = document.GetProperty(i-1);
+					if (property == nullptr)
+					{
+						logtd("Document has no property at %d: %s", i-1, trigger.CStr());
+						break;
+					}
+
+					// if last item is must be object or array
+					if (i == trigger_list.size()-1)
+					{
+						if (property->GetType() != AmfDataType::Object && property->GetType() != AmfDataType::Array)
+						{
+							logtd("Property type is not object or array: %s / %d", property->GetString(), static_cast<int32_t>(property->GetType()));
+							break;
+						}
+
+						auto object = property->GetObject();
+						if (object == nullptr)
+						{
+							logtd("Property is not object: %s", property->GetString());
+							break;
+						}
+
+						auto key = trigger_list.at(i);
+						int32_t index = 0;
+						if ((index = object->FindName(key.CStr())) >= 0 && object->GetType(index) == AmfDataType::String)
+						{
+							found = true;
+							auto value = object->GetString(index);
+							GenerateEvent(event, value);
+						}
+					}
+					else
+					{
+						if (trigger_list.at(i) != property->GetString())
+						{
+							logtd("Document property mismatch at %d: %s != %s", i-1, trigger_list.at(i).CStr(), property->GetString());
+							break;
+						}
+					}
+				}
+			}
+		}
+
+		return found;
+	}
+
+	void RtmpStream::GenerateEvent(const cfg::vhost::app::pvd::Event &event, const ov::String &value)
+	{
+		logtd("Event generated: %s / %s", event.GetTrigger().CStr(), value.CStr());
+
+		bool id3_enabled = false;
+		auto id3v2_event = event.GetHLSID3v2(&id3_enabled);
+
+		if (id3_enabled == true)
+		{
+			ID3v2 tag;
+			tag.SetVersion(4, 0);
+
+			if (id3v2_event.GetFrameType() == "TXXX")
+			{
+				auto info = id3v2_event.GetInfo();
+				auto data = id3v2_event.GetData();
+
+				if (info == "${TriggerValue}")
+				{
+					info = value;
+				}
+				else if (data == "${TriggerValue}")
+				{
+					data = value;
+				}
+
+				tag.AddFrame(std::make_shared<ID3v2TxxxFrame>(info, data));
+			}
+			else if (id3v2_event.GetFrameType().UpperCaseString().Get(0) == 'T')
+			{
+				auto data = id3v2_event.GetData();
+
+				if (data == "${TriggerValue}")
+				{
+					data = value;
+				}
+
+				tag.AddFrame(std::make_shared<ID3v2TextFrame>(id3v2_event.GetFrameType(), data));
+			}
+			else
+			{
+				logtw("Unsupported ID3v2 frame type: %s", id3v2_event.GetFrameType().CStr());
+				return;
+			}
+
+			cmn::PacketType packet_type = cmn::PacketType::EVENT;
+			if (id3v2_event.GetEventType().LowerCaseString() == "video")
+			{
+				packet_type = cmn::PacketType::VIDEO_EVENT;
+			}
+			else if (id3v2_event.GetEventType().LowerCaseString() == "audio")
+			{
+				packet_type = cmn::PacketType::AUDIO_EVENT;
+			}
+			else if (id3v2_event.GetEventType().LowerCaseString() == "event")
+			{
+				packet_type = cmn::PacketType::EVENT;
+			}
+			else
+			{
+				logtw("Unsupported inject type: %s", id3v2_event.GetEventType().CStr());
+				return;
+			}
+
+
+			int64_t pts = 0;
+			if (packet_type == cmn::PacketType::VIDEO_EVENT)
+			{
+				pts = _last_video_pts;
+				pts += _last_video_pts_clock.Elapsed();
+			}
+			else if (packet_type == cmn::PacketType::AUDIO_EVENT)
+			{
+				pts = _last_audio_pts;
+				pts += _last_audio_pts_clock.Elapsed();
+			}
+
+			SendDataFrame(pts, cmn::BitstreamFormat::ID3v2, packet_type, tag.Serialize());
 		}
 	}
 
@@ -1247,6 +1403,8 @@ namespace pvd
 			dts *= video_track->GetVideoTimestampScale();
 			pts *= video_track->GetVideoTimestampScale();
 
+			AdjustTimestamp(pts, dts);
+
 			cmn::PacketType packet_type = cmn::PacketType::Unknown;
 			if (flv_video.PacketType() == FlvAvcPacketType::AVC_SEQUENCE_HEADER)
 			{
@@ -1277,12 +1435,27 @@ namespace pvd
 															 packet_type);
 
 			SendFrame(video_frame);
+
+			// logtc("Video packet sent - stream(%s/%s) type(%d) size(%d) pts(%lld) dts(%lld)",
+			// 	  _vhost_app_name.CStr(),
+			// 	  _stream_name.CStr(),
+			// 	  flv_video.PacketType(),
+			// 	  flv_video.PayloadLength(),
+			// 	  pts,
+			// 	  dts);
+
+			_last_video_pts = dts;
+			_last_video_pts_clock.Start();
 			
 			// Statistics for debugging
 			if (flv_video.FrameType() == FlvVideoFrameTypes::KEY_FRAME)
 			{
 				_key_frame_interval = message->header->completed.timestamp - _previous_key_frame_timestamp;
 				_previous_key_frame_timestamp = message->header->completed.timestamp;
+				video_frame->SetFlag(MediaPacketFlag::Key);
+			}
+			else {
+				video_frame->SetFlag(MediaPacketFlag::NoFlag);
 			}
 
 			_last_video_timestamp = message->header->completed.timestamp;
@@ -1291,9 +1464,9 @@ namespace pvd
 			time_t current_time = time(nullptr);
 			uint32_t check_gap = current_time - _stream_check_time;
 
-			if (check_gap >= 60)
+			if (check_gap >= 10)
 			{
-				logtd("Rtmp Provider Info - stream(%s/%s) key(%ums) timestamp(v:%ums/a:%ums/g:%dms) fps(v:%u/a:%u) gap(v:%ums/a:%ums)",
+				logi("RTMPProvider.Stat", "Rtmp Provider Info - stream(%s/%s) key(%ums) timestamp(v:%ums/a:%ums/g:%dms) fps(v:%u/a:%u) gap(v:%ums/a:%ums)",
 					  _vhost_app_name.CStr(),
 					  _stream_name.CStr(),
 					  _key_frame_interval,
@@ -1413,6 +1586,8 @@ namespace pvd
 
 			pts *= audio_track->GetAudioTimestampScale();
 			dts *= audio_track->GetAudioTimestampScale();
+
+			AdjustTimestamp(pts, dts);
 	 
 			cmn::PacketType packet_type = cmn::PacketType::Unknown;
 			if (flv_audio.PacketType() == FlvAACPacketType::SEQUENCE_HEADER)
@@ -1439,6 +1614,9 @@ namespace pvd
 
 			SendFrame(frame);
 
+			_last_audio_pts = dts;
+			_last_audio_pts_clock.Start();
+
 			_last_audio_timestamp = message->header->completed.timestamp;
 			_audio_frame_count++;
 		}
@@ -1446,19 +1624,50 @@ namespace pvd
 		return true;
 	}
 
+	// Make PTS/DTS of first frame are 0
+	void RtmpStream::AdjustTimestamp(int64_t &pts, int64_t &dts)
+	{
+		if (_first_frame == true)
+		{
+			_first_frame = false;
+			_first_pts_offset = pts;
+			_first_dts_offset = dts;
+		}
+
+		pts -= _first_pts_offset;
+		dts -= _first_dts_offset;
+	}
+
 	bool RtmpStream::PublishStream()
 	{
 		if (_publish_url == nullptr)
 		{
+			logte("Publish url is not set, stream(%s/%s)", _vhost_app_name.CStr(), _stream_name.CStr());
 			return false;
 		}
+
+		auto vhost_app_name = ocst::Orchestrator::GetInstance()->ResolveApplicationNameFromDomain(_publish_url->Host(), _publish_url->App());
+
+		// Get application config
+		if (GetProvider() == nullptr)
+		{
+			logte("Could not find provider: stream(%s/%s)", _vhost_app_name.CStr(), _stream_name.CStr());
+			return false;
+		}
+
+		auto application = GetProvider()->GetApplicationByName(vhost_app_name);
+		if (application == nullptr)
+		{
+			logte("Could not find application: stream(%s/%s)", _vhost_app_name.CStr(), _stream_name.CStr());
+			return false;
+		}
+
+		_event_generator = application->GetConfig().GetProviders().GetRtmpProvider().GetEventGenerator();
 
 		SetName(_publish_url->Stream());
 
 		// Set Track Info
 		SetTrackInfo(_media_info);
-
-		auto vhost_app_name = ocst::Orchestrator::GetInstance()->ResolveApplicationNameFromDomain(_publish_url->Host(), _publish_url->App());
 
 		// Publish
 		if (PublishChannel(vhost_app_name) == false)
@@ -1466,6 +1675,25 @@ namespace pvd
 			Stop();
 			return false;
 		}
+
+#if 0
+		// Keep Alive Data Channel
+		_event_test_timer.Push(
+		[this](void *paramter) -> ov::DelayQueueAction {
+			
+			for (const auto &event : _event_generator.GetEvents())
+			{
+				if (event.GetTrigger() == "KEEP-ALIVE")
+				{
+					GenerateEvent(event, "KEEP-ALIVE");
+				}
+			}
+
+			return ov::DelayQueueAction::Repeat;
+		},
+		500);
+		_event_test_timer.Start();
+#endif
 
 		//   stored messages
 		for (auto message : _stream_message_cache)
@@ -1538,6 +1766,19 @@ namespace pvd
 			}
 
 			AddTrack(new_track);
+		}
+
+		// Data Track
+		if (_event_generator.GetEvents().size() > 0)
+		{
+			auto data_track = std::make_shared<MediaTrack>();
+
+			data_track->SetId(RTMP_DATA_TRACK_ID);
+			data_track->SetMediaType(cmn::MediaType::Data);
+			data_track->SetTimeBase(1, 1000);
+			data_track->SetOriginBitstream(cmn::BitstreamFormat::ID3v2);
+			
+			AddTrack(data_track);
 		}
 
 		return true;

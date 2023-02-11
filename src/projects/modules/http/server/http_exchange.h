@@ -19,7 +19,6 @@ namespace http
 	{
 		class HttpConnection;
 
-		// For HTTP/1.1
 		class HttpExchange : public ov::EnableSharedFromThis<HttpExchange>
 		{
 		public:
@@ -36,7 +35,7 @@ namespace http
 
 			HttpExchange(const std::shared_ptr<HttpConnection> &connection);
 			HttpExchange(const std::shared_ptr<HttpExchange> &exchange); // Copy
-			virtual ~HttpExchange() = default;
+			~HttpExchange();
 
 			// Get connection
 			std::shared_ptr<HttpConnection> GetConnection() const;
@@ -51,6 +50,7 @@ namespace http
 			bool IsKeepAlive() const;
 
 			ov::String ToString() const;
+			ov::String GetDebugInfo() const;
 
 			virtual std::shared_ptr<HttpRequest> GetRequest() const = 0;
 			virtual std::shared_ptr<HttpResponse> GetResponse() const = 0;

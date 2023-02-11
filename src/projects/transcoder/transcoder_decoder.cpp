@@ -22,6 +22,103 @@
 
 #define MAX_QUEUE_SIZE 120
 
+std::shared_ptr<TranscodeDecoder> TranscodeDecoder::Create(int32_t decoder_id, const info::Stream &info, std::shared_ptr<MediaTrack> track, CompleteHandler complete_handler)
+{
+	std::shared_ptr<TranscodeDecoder> decoder = nullptr;
+
+	bool use_hwaccel = track->GetHardwareAccel();
+	logtd("Hardware acceleration of the decoder is %s", use_hwaccel ? "enabled" : "disabled");
+
+	switch (track->GetCodecId())
+	{
+		case cmn::MediaCodecId::H264:
+			if ((use_hwaccel == true) && TranscodeGPU::GetInstance()->IsSupportedQSV() == true)
+			{
+				decoder = std::make_shared<DecoderAVCxQSV>(info);
+				if (decoder != nullptr && decoder->Configure(track) == true)
+				{
+					goto done;
+				}
+			}
+
+			if ((use_hwaccel == true) && TranscodeGPU::GetInstance()->IsSupportedNV() == true)
+			{
+				decoder = std::make_shared<DecoderAVCxNV>(info);
+				if (decoder != nullptr && decoder->Configure(track) == true)
+				{
+					goto done;
+				}
+			}
+
+			decoder = std::make_shared<DecoderAVC>(info);
+			if (decoder != nullptr && decoder->Configure(track) == true)
+			{
+				goto done;
+			}
+			break;
+
+		case cmn::MediaCodecId::H265:
+
+			if ((use_hwaccel == true) && TranscodeGPU::GetInstance()->IsSupportedQSV() == true)
+			{
+				decoder = std::make_shared<DecoderHEVCxQSV>(info);
+				if (decoder != nullptr && decoder->Configure(track) == true)
+				{
+					goto done;
+				}
+			}
+
+			if ((use_hwaccel == true) && TranscodeGPU::GetInstance()->IsSupportedNV() == true)
+			{
+				decoder = std::make_shared<DecoderHEVCxNV>(info);
+				if (decoder != nullptr && decoder->Configure(track) == true)
+				{
+					goto done;
+				}
+			}
+
+			decoder = std::make_shared<DecoderHEVC>(info);
+			if (decoder != nullptr && decoder->Configure(track) == true)
+			{
+				goto done;
+			}
+			break;
+		case cmn::MediaCodecId::Vp8:
+			decoder = std::make_shared<DecoderVP8>(info);
+			if (decoder != nullptr && decoder->Configure(track) == true)
+			{
+				goto done;
+			}
+			break;
+		case cmn::MediaCodecId::Aac:
+			decoder = std::make_shared<DecoderAAC>(info);
+			if (decoder != nullptr && decoder->Configure(track) == true)
+			{
+				goto done;
+			}
+			break;
+		case cmn::MediaCodecId::Opus:
+			decoder = std::make_shared<DecoderOPUS>(info);
+			if (decoder != nullptr && decoder->Configure(track) == true)
+			{
+				goto done;
+			}
+			break;
+		default:
+			OV_ASSERT(false, "Not supported codec: %d", track->GetCodecId());
+			break;
+	}
+
+done:
+	if (decoder != nullptr)
+	{
+		decoder->SetDecoderId(decoder_id);
+		decoder->SetCompleteHandler(complete_handler);
+	}
+
+	return decoder;
+}
+
 TranscodeDecoder::TranscodeDecoder(info::Stream stream_info)
 	: _stream_info(stream_info)
 {
@@ -40,134 +137,57 @@ TranscodeDecoder::~TranscodeDecoder()
 		}
 	}
 
-	::avcodec_free_context(&_context);
-	::avcodec_parameters_free(&_codec_par);
-
-	::av_frame_free(&_frame);
-	::av_packet_free(&_pkt);
-
-	::av_parser_close(_parser);
-
-	_input_buffer.Clear();
-	_output_buffer.Clear();
-}
-
-std::shared_ptr<TranscodeContext> &TranscodeDecoder::GetContext()
-{
-	return _input_context;
-}
-
-cmn::Timebase TranscodeDecoder::GetTimebase() const
-{
-	return _input_context->GetTimeBase();
-}
-
-void TranscodeDecoder::SetTrackId(int32_t track_id)
-{
-	_track_id = track_id;
-}
-
-std::shared_ptr<TranscodeDecoder> TranscodeDecoder::CreateDecoder(const info::Stream &info, std::shared_ptr<TranscodeContext> context)
-{
-	std::shared_ptr<TranscodeDecoder> decoder = nullptr;
-
-	bool use_hwaccel = context->GetHardwareAccel();
-	logtd("Use hardware accelerator for decoder is %s", use_hwaccel ? "enabled" : "disabled");
-
-	switch (context->GetCodecId())
+	if (_context != nullptr)
 	{
-		case cmn::MediaCodecId::H264:
-#if SUPPORT_HWACCELS
-			if (use_hwaccel == true && TranscodeGPU::GetInstance()->IsSupportedQSV() == true)
-			{
-				decoder = std::make_shared<DecoderAVCxQSV>(info);
-				if (decoder != nullptr && decoder->Configure(context) == true)
-				{
-					return decoder;
-				}
-			}
-
-			if (use_hwaccel == true && TranscodeGPU::GetInstance()->IsSupportedNV() == true)
-			{
-				decoder = std::make_shared<DecoderAVCxNV>(info);
-				if (decoder != nullptr && decoder->Configure(context) == true)
-				{
-					return decoder;
-				}
-			}
-#endif
-			decoder = std::make_shared<DecoderAVC>(info);
-			if (decoder != nullptr && decoder->Configure(context) == true)
-			{
-				return decoder;
-			}
-			break;
-
-		case cmn::MediaCodecId::H265:
-#if SUPPORT_HWACCELS
-			if (use_hwaccel == true && TranscodeGPU::GetInstance()->IsSupportedQSV() == true)
-			{
-				decoder = std::make_shared<DecoderHEVCxQSV>(info);
-				if (decoder != nullptr && decoder->Configure(context) == true)
-				{
-					return decoder;
-				}
-			}
-
-			if (use_hwaccel == true && TranscodeGPU::GetInstance()->IsSupportedNV() == true)
-			{
-				decoder = std::make_shared<DecoderHEVCxNV>(info);
-				if (decoder != nullptr && decoder->Configure(context) == true)
-				{
-					return decoder;
-				}
-			}
-#endif
-			decoder = std::make_shared<DecoderHEVC>(info);
-			if (decoder != nullptr && decoder->Configure(context) == true)
-			{
-				return decoder;
-			}
-			break;
-		case cmn::MediaCodecId::Vp8:
-			decoder = std::make_shared<DecoderVP8>(info);
-			if (decoder != nullptr && decoder->Configure(context) == true)
-			{
-				return decoder;
-			}
-			break;
-		case cmn::MediaCodecId::Aac:
-			decoder = std::make_shared<DecoderAAC>(info);
-			if (decoder != nullptr && decoder->Configure(context) == true)
-			{
-				return decoder;
-			}
-			break;
-		case cmn::MediaCodecId::Opus:
-			decoder = std::make_shared<DecoderOPUS>(info);
-			if (decoder != nullptr && decoder->Configure(context) == true)
-			{
-				return decoder;
-			}
-			break;
-		default:
-			OV_ASSERT(false, "Not supported codec: %d", context->GetCodecId());
-			break;
+		::avcodec_free_context(&_context);
 	}
 
-	return nullptr;
+	if (_codec_par != nullptr)
+	{
+		::avcodec_parameters_free(&_codec_par);
+	}
+
+	if (_frame != nullptr)
+	{
+		::av_frame_free(&_frame);
+	}
+
+	if (_pkt != nullptr)
+	{
+		::av_packet_free(&_pkt);
+	}
+
+	if (_parser != nullptr)
+	{
+		::av_parser_close(_parser);
+	}
+
+	_input_buffer.Clear();
 }
 
-bool TranscodeDecoder::Configure(std::shared_ptr<TranscodeContext> context)
+std::shared_ptr<MediaTrack> &TranscodeDecoder::GetRefTrack()
 {
-	_input_buffer.SetAlias(ov::String::FormatString("Input queue of Decoder. codec(%s/%d)", ::avcodec_get_name(GetCodecID()), GetCodecID()));
+	return _track;
+}
+
+cmn::Timebase TranscodeDecoder::GetTimebase()
+{
+	return GetRefTrack()->GetTimeBase();
+}
+
+void TranscodeDecoder::SetDecoderId(int32_t decoder_id)
+{
+	_decoder_id = decoder_id;
+}
+
+bool TranscodeDecoder::Configure(std::shared_ptr<MediaTrack> track)
+{
+	_input_buffer.SetAlias(ov::String::FormatString("Input queue of Decoder. track(%d) codec(%s/%d)", track->GetId(), ::avcodec_get_name(GetCodecID()), GetCodecID()));
 	_input_buffer.SetThreshold(MAX_QUEUE_SIZE);
-	_output_buffer.SetAlias(ov::String::FormatString("Output queue of Decoder. codec(%s/%d)", ::avcodec_get_name(GetCodecID()), GetCodecID()));
-	_output_buffer.SetThreshold(MAX_QUEUE_SIZE);
 
-	_input_context = context;
+	_track = track;
 
-	return (_input_context != nullptr);
+	return (_track != nullptr);
 }
 
 void TranscodeDecoder::SendBuffer(std::shared_ptr<const MediaPacket> packet)
@@ -175,32 +195,14 @@ void TranscodeDecoder::SendBuffer(std::shared_ptr<const MediaPacket> packet)
 	_input_buffer.Enqueue(std::move(packet));
 }
 
-void TranscodeDecoder::SendOutputBuffer(bool change_format, int32_t track_id, std::shared_ptr<MediaFrame> frame)
+void TranscodeDecoder::SendOutputBuffer(TranscodeResult result, std::shared_ptr<MediaFrame> frame)
 {
-	_output_buffer.Enqueue(std::move(frame));
-
 	// Invoke callback function when encoding/decoding is completed.
-	if (OnCompleteHandler)
+	if (_complete_handler)
 	{
-		OnCompleteHandler(change_format ? TranscodeResult::FormatChanged : TranscodeResult::DataReady, track_id);
+		frame->SetTrackId(_decoder_id);
+		_complete_handler(result, _decoder_id, std::move(frame));
 	}
-}
-
-std::shared_ptr<MediaFrame> TranscodeDecoder::RecvBuffer(TranscodeResult *result)
-{
-	if (!_output_buffer.IsEmpty())
-	{
-		*result = TranscodeResult::DataReady;
-
-		auto obj = _output_buffer.Dequeue();
-		if (obj.has_value())
-		{
-			return obj.value();
-		}
-	}
-
-	*result = TranscodeResult::NoData;
-	return nullptr;
 }
 
 void TranscodeDecoder::Stop()
@@ -208,7 +210,6 @@ void TranscodeDecoder::Stop()
 	_kill_flag = true;
 
 	_input_buffer.Stop();
-	_output_buffer.Stop();
 
 	if (_codec_thread.joinable())
 	{

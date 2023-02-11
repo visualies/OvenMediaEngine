@@ -96,6 +96,10 @@ namespace pub
 				{
 					stream_data->_stream->SendAudioFrame(stream_data->_media_packet);
 				}
+				else if (stream_data->_media_packet->GetMediaType() == cmn::MediaType::Data)
+				{
+					stream_data->_stream->SendDataFrame(stream_data->_media_packet);
+				}
 				else
 				{
 					// Nothing can do
@@ -261,7 +265,12 @@ namespace pub
 		lock.unlock();
 
 		// Start stream
-		stream->Start();
+		if (stream->Start() == false)
+		{
+			stream->SetState(Stream::State::ERROR);
+			logtw("%s could not start [%s] stream.", GetApplicationTypeName(), info->GetName().CStr(), info->GetId());
+			return false;
+		}
 
 		return true;
 	}

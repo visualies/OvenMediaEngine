@@ -10,7 +10,7 @@
 
 #include <base/info/host.h>
 #include <base/mediarouter/mediarouter_application_observer.h>
-
+#include <modules/origin_map_client/origin_map_client.h>
 #include <regex>
 
 #include "interfaces.h"
@@ -66,6 +66,14 @@ namespace ocst
 
 		// A flag used to determine if an item has changed
 		ItemState state = ItemState::Unknown;
+
+		bool _persistent = false;
+
+		bool _failback = false;
+
+		bool _strict_location = false;
+		
+		bool _relay = true;
 	};
 
 	struct Host
@@ -125,7 +133,7 @@ namespace ocst
 		VirtualHost(const info::Host &new_host_info);
 
 		void MarkAllAs(ItemState state);
-		bool MarkAllAs(ItemState expected_old_state, ItemState state);
+		bool MarkAllAs(ItemState state, int state_count, ...);
 
 		// Origin Host Info
 		info::Host host_info;
@@ -138,6 +146,11 @@ namespace ocst
 
 		// Origin list
 		std::vector<Origin> origin_list;
+
+		// OriginMapStore
+		bool is_origin_map_store_enabled = false;
+		ov::String origin_base_url;
+		std::shared_ptr<OriginMapClient> origin_map_client = nullptr;
 
 		// Application list
 		std::map<info::application_id_t, std::shared_ptr<Application>> app_map;

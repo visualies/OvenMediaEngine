@@ -168,7 +168,7 @@ std::shared_ptr<LLHlsHttpInterceptor> LLHlsPublisher::CreateInterceptor()
 	auto http_interceptor = std::make_shared<LLHlsHttpInterceptor>();
 
 	// Register Request Handler
-	http_interceptor->Register(http::Method::Options, R"(.+llhls\.(m3u8|m4s)$)", [this](const std::shared_ptr<http::svr::HttpExchange> &exchange) -> http::svr::NextHandler {
+	http_interceptor->Register(http::Method::Options, R"((.+\.m3u8$)|(.+llhls\.m4s$))", [this](const std::shared_ptr<http::svr::HttpExchange> &exchange) -> http::svr::NextHandler {
 		auto connection = exchange->GetConnection();
 		auto request = exchange->GetRequest();
 		auto response = exchange->GetResponse();
@@ -195,13 +195,20 @@ std::shared_ptr<LLHlsHttpInterceptor> LLHlsPublisher::CreateInterceptor()
 		response->SetHeader("Access-Control-Allow-Private-Network", "true");
 
 		auto application = std::static_pointer_cast<LLHlsApplication>(GetApplicationByName(vhost_app_name));
+		if(application == nullptr)
+		{
+			logte("Could not found application: %s", vhost_app_name.CStr());
+			response->SetStatusCode(http::StatusCode::NotFound);
+			return http::svr::NextHandler::DoNotCall;
+		}
+
 		application->GetCorsManager().SetupHttpCorsHeader(vhost_app_name, request, response);
 
 		return http::svr::NextHandler::DoNotCall;
 	});
 
 
-	http_interceptor->Register(http::Method::Get, R"(.+llhls\.(m3u8|m4s)$)", [this](const std::shared_ptr<http::svr::HttpExchange> &exchange) -> http::svr::NextHandler {
+	http_interceptor->Register(http::Method::Get, R"((.+\.m3u8$)|(.+llhls\.m4s$))", [this](const std::shared_ptr<http::svr::HttpExchange> &exchange) -> http::svr::NextHandler {
 
 		auto connection = exchange->GetConnection();
 		auto request = exchange->GetRequest();
@@ -222,7 +229,7 @@ std::shared_ptr<LLHlsHttpInterceptor> LLHlsPublisher::CreateInterceptor()
 			request_url->SetPort(request->GetRemote()->GetLocalAddress()->Port());
 		}
 
-		logtd("LLHLS requested: %s", request->GetUri().CStr());
+		logtd("LLHLS requested(connection : %u): %s", connection->GetId(), request->GetUri().CStr());
 
 		auto vhost_app_name = ocst::Orchestrator::GetInstance()->ResolveApplicationNameFromDomain(request_url->Host(), request_url->App());
 		if (vhost_app_name.IsValid() == false)
@@ -231,14 +238,24 @@ std::shared_ptr<LLHlsHttpInterceptor> LLHlsPublisher::CreateInterceptor()
 			response->SetStatusCode(http::StatusCode::NotFound);
 			return http::svr::NextHandler::DoNotCall;
 		}
+
+		auto application = std::static_pointer_cast<LLHlsApplication>(GetApplicationByName(vhost_app_name));
+		if (application == nullptr)
+		{
+			logte("Could not found application: %s", vhost_app_name.CStr());
+			response->SetStatusCode(http::StatusCode::NotFound);
+			return http::svr::NextHandler::DoNotCall;
+		}
+
+		auto origin_mode = application->IsOriginMode();
 		auto host_name = request_url->Host();
 		auto stream_name = request_url->Stream();
 
 		uint64_t session_life_time = 0;
-
 		bool access_control_enabled = IsAccessControlEnabled(request_url);
 
-		if (access_control_enabled == true && request_url->File() == "llhls.m3u8")
+		// Check if the request is for the master playlist
+		if (access_control_enabled == true && (request_url->File().IndexOf(".m3u8") > 0 && request_url->File().IndexOf("chunklist") == -1))
 		{
 			auto [signed_policy_result, signed_policy] =  Publisher::VerifyBySignedPolicy(request_url, remote_address);
 			if(signed_policy_result == AccessController::VerificationResult::Pass)
@@ -305,7 +322,7 @@ std::shared_ptr<LLHlsHttpInterceptor> LLHlsPublisher::CreateInterceptor()
 			}
 		}
 
-		auto stream = GetStream(vhost_app_name, request_url->Stream());
+		auto stream = application->GetStream(request_url->Stream());
 		if (stream == nullptr)
 		{
 			// If the stream does not exists, request to the provider
@@ -327,14 +344,25 @@ std::shared_ptr<LLHlsHttpInterceptor> LLHlsPublisher::CreateInterceptor()
 
 		std::shared_ptr<LLHlsSession> session = nullptr; 
 
-		if (request_url->File() == "llhls.m3u8")
+		// Master playlist (.m3u8 and NOT *chunklist*.m3u8)
+		if (request_url->File().IndexOf(".m3u8") > 0 && request_url->File().IndexOf("chunklist") == -1)
 		{
 			session_id_t session_id = connection->GetId();
-			session = std::static_pointer_cast<LLHlsSession>(stream->GetSession(session_id));
-			if (session == nullptr)
+
+			try
+			{
+				// If this connection has been used by another session in the past, it is reused.
+				session = std::any_cast<std::shared_ptr<LLHlsSession>>(connection->GetUserData(stream->GetUri()));
+			}
+			catch (const std::bad_any_cast& e)
+			{
+				session = std::static_pointer_cast<LLHlsSession>(stream->GetSession(session_id));
+			}
+
+			if (session == nullptr || session->GetStream() != stream)
 			{
 				// New HTTP Connection
-				session = LLHlsSession::Create(session_id, "", stream->GetApplication(), stream, session_life_time);
+				session = LLHlsSession::Create(session_id, origin_mode, "", stream->GetApplication(), stream, session_life_time);
 				if (session == nullptr)
 				{
 					logte("Could not create llhls session for request: %s", request->ToString().CStr());
@@ -349,32 +377,39 @@ std::shared_ptr<LLHlsHttpInterceptor> LLHlsPublisher::CreateInterceptor()
 		// x_x_x.m4s?session=<session id>_<key>
 		else
 		{
-			// ?session=<session id>_<key>
-			auto query_string = request_url->GetQueryValue("session");
-			auto id_key = query_string.Split("_");
-			if (id_key.size() != 2)
-			{
-				logte("Invalid session key : %s", request_url->ToUrlString().CStr());
-				response->SetStatusCode(http::StatusCode::Unauthorized);
-				return http::svr::NextHandler::DoNotCall;
-			}
+			session_id_t session_id = connection->GetId();
+			ov::String session_key;
 
-			auto session_id = ov::Converter::ToUInt32(id_key[0].CStr());
-			auto session_key = id_key[1];
+			if (origin_mode == false)
+			{
+				// ?session=<session id>_<key>
+				// This collects them into one session even if one player connects through multiple connections.
+				auto query_string = request_url->GetQueryValue("session");
+				auto id_key = query_string.Split("_");
+				if (id_key.size() != 2)
+				{
+					logte("Invalid session key : %s", request_url->ToUrlString().CStr());
+					response->SetStatusCode(http::StatusCode::Unauthorized);
+					return http::svr::NextHandler::DoNotCall;
+				}
+
+				session_id = ov::Converter::ToUInt32(id_key[0].CStr());
+				session_key = id_key[1];
+			}
 
 			session = std::static_pointer_cast<LLHlsSession>(stream->GetSession(session_id));
 			if (session == nullptr)
 			{
 				if (access_control_enabled == true)
 				{
-					logte("Invalid session_key : %s", query_string.CStr());
+					logte("Invalid session_key : %s", request_url->ToUrlString().CStr());
 					response->SetStatusCode(http::StatusCode::Unauthorized);
 					return http::svr::NextHandler::DoNotCall;
 				}
 				else
 				{
 					// New HTTP Connection
-					session = LLHlsSession::Create(session_id, session_key, stream->GetApplication(), stream, session_life_time);
+					session = LLHlsSession::Create(session_id, origin_mode, session_key, stream->GetApplication(), stream, session_life_time);
 					if (session == nullptr)
 					{
 						logte("Could not create llhls session for request: %s", request->ToString().CStr());
@@ -389,7 +424,7 @@ std::shared_ptr<LLHlsHttpInterceptor> LLHlsPublisher::CreateInterceptor()
 			{
 				if (access_control_enabled == true && session_key != session->GetSessionKey())
 				{
-					logte("Invalid session_key : %s", query_string.CStr());
+					logte("Invalid session_key : %s", request_url->ToUrlString().CStr());
 					response->SetStatusCode(http::StatusCode::Unauthorized);
 					return http::svr::NextHandler::DoNotCall;
 				}
@@ -397,11 +432,10 @@ std::shared_ptr<LLHlsHttpInterceptor> LLHlsPublisher::CreateInterceptor()
 		}
 
 		// It will be used in CloseHandler
-		connection->SetUserData(session);
+		connection->AddUserData(stream->GetUri(), session);
 		session->UpdateLastRequest(connection->GetId());
 
 		// Cors Setting
-		auto application = std::static_pointer_cast<LLHlsApplication>(stream->GetApplication());
 		application->GetCorsManager().SetupHttpCorsHeader(vhost_app_name, request, response);
 		stream->SendMessage(session, std::make_any<std::shared_ptr<http::svr::HttpExchange>>(exchange));
 
@@ -411,36 +445,35 @@ std::shared_ptr<LLHlsHttpInterceptor> LLHlsPublisher::CreateInterceptor()
 	// Set Close Handler
 	http_interceptor->SetCloseHandler([this](const std::shared_ptr<http::svr::HttpConnection> &connection, PhysicalPortDisconnectReason reason) -> void {
 		
-		try 
+		for (auto &user_data : connection->GetUserDataMap())
 		{
-			// Get session from user_data of connection
-			auto session = std::any_cast<std::shared_ptr<LLHlsSession>>(connection->GetUserData());
-			if (session == nullptr)
+			std::shared_ptr<LLHlsSession> session;
+
+			try
 			{
-				// Never reach here
-				logte("Could not get llhls session from user_data of connection");
-				return;
+				session = std::any_cast<std::shared_ptr<LLHlsSession>>(user_data.second);
 			}
-
-			session->OnConnectionDisconnected(connection->GetId());
-
-			if (session->IsNoConnection())
+			catch (const std::bad_any_cast &)
 			{
-				logtd("llhls session is closed : %u", session->GetId());
-				// Remove session from stream
-				auto stream = session->GetStream();
-				if (stream != nullptr)
+				continue;
+			}
+			
+			if (session != nullptr)
+			{
+				session->OnConnectionDisconnected(connection->GetId());
+				if (session->IsNoConnection())
 				{
-					stream->RemoveSession(session->GetId());
+					logtd("llhls session is closed : %u", session->GetId());
+					// Remove session from stream
+					auto stream = session->GetStream();
+					if (stream != nullptr)
+					{
+						stream->RemoveSession(session->GetId());
+					}
 				}
-			}
 
-			connection->SetUserData(nullptr);
-			session->Stop();
-		}
-		catch (const std::bad_any_cast &)
-		{
-			logte("Could not get llhls session from user data");
+				session->Stop();
+			}
 		}
 	});
 

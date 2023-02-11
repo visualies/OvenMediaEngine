@@ -38,9 +38,9 @@ namespace pvd
 	class FileStream : public pvd::PullStream
 	{
 	public:
-		static std::shared_ptr<FileStream> Create(const std::shared_ptr<pvd::PullApplication> &application, const uint32_t stream_id, const ov::String &stream_name, const std::vector<ov::String> &url_list, std::shared_ptr<pvd::PullStreamProperties> properties);
+		static std::shared_ptr<FileStream> Create(const std::shared_ptr<pvd::PullApplication> &application, const uint32_t stream_id, const ov::String &stream_name, const std::vector<ov::String> &url_list, const std::shared_ptr<pvd::PullStreamProperties> &properties);
 
-		FileStream(const std::shared_ptr<pvd::PullApplication> &application, const info::Stream &stream_info, const std::vector<ov::String> &url_list, std::shared_ptr<pvd::PullStreamProperties> properties);
+		FileStream(const std::shared_ptr<pvd::PullApplication> &application, const info::Stream &stream_info, const std::vector<ov::String> &url_list, const std::shared_ptr<pvd::PullStreamProperties> &properties);
 		~FileStream() final;
 
 		ProcessMediaEventTrigger GetProcessMediaEventTriggerMode() override
@@ -80,6 +80,8 @@ namespace pvd
 
 		ov::StopWatch _play_request_time;
 
+		bool _sent_sequence_header = false;
+		
 		// Statistics
 		int64_t _origin_request_time_msec = 0;
 		int64_t _origin_response_time_msec = 0;

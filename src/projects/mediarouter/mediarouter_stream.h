@@ -26,7 +26,6 @@ enum class MediaRouterStreamType : int8_t
 	OUTBOUND
 };
 
-typedef int32_t MediaTrackId;
 
 class MediaRouteStream
 {
@@ -51,7 +50,7 @@ public:
 
 	void OnStreamPrepared(bool completed);
 	bool IsStreamPrepared();
-	bool AreAllTracksParsed();
+	bool AreAllTracksReady();
 
 	void Flush();
 	
@@ -91,7 +90,7 @@ private:
 	// Store the correction values in case of sudden change in PTS.
 	// If the PTS suddenly increases, the filter behaves incorrectly.
 	std::map<MediaTrackId, int64_t> _pts_last;
-	std::map<MediaTrackId, int64_t> _dts_last;
+
 	// <TrackId, Pts>
 	std::map<MediaTrackId, int64_t> _pts_correct;
 	// Average Pts Incresement
@@ -106,7 +105,6 @@ private:
 	std::map<MediaTrackId, int64_t> _stat_recv_pkt_ldts;
 	std::map<MediaTrackId, int64_t> _stat_recv_pkt_size;
 	std::map<MediaTrackId, int64_t> _stat_recv_pkt_count;
-	std::map<MediaTrackId, int64_t> _stat_first_time_diff;
 
 	// Time for statistics
 	ov::StopWatch _stop_watch;
@@ -114,7 +112,8 @@ private:
 	std::chrono::time_point<std::chrono::system_clock> _stat_start_time;
 
 
-	uint32_t _max_warning_count_bframe;
+	uint32_t _warning_count_bframe;
+	uint32_t _warning_count_out_of_order;
 
 
 	void DumpPacket(std::shared_ptr<MediaPacket> &media_packet, bool dump = false);

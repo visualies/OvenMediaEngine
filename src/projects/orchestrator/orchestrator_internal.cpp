@@ -7,9 +7,8 @@
 //
 //==============================================================================
 #include "orchestrator_internal.h"
-
 #include <monitoring/monitoring.h>
-
+#include <base/provider/pull_provider/stream.h>
 #include "orchestrator_private.h"
 
 namespace ocst
@@ -444,9 +443,27 @@ namespace ocst
 			vhost->origin_list.emplace_back(origin_config);
 		}
 
+		bool enabled = false;
+		auto store = vhost_info.GetOriginMapStore(&enabled);
+		if (enabled == true)
+		{
+			// Make ovt base url
+			auto ovt_port = cfg::ConfigManager::GetInstance()->GetServer()->GetBind().GetPublishers().GetOvt().GetPort();
+			vhost->origin_map_client = std::make_shared<OriginMapClient>(store.GetRedisServer().GetHost(), store.GetRedisServer().GetAuth());
+			vhost->is_origin_map_store_enabled = true;
+
+			if (store.GetOriginHostName().IsEmpty() == false)
+			{
+				vhost->origin_base_url = ov::String::FormatString("ovt://%s:%d", store.GetOriginHostName().CStr(), ovt_port.GetPort());
+			}
+			else
+			{
+				logti("OriginMapStore::OriginHostName is not specified. This OriginMapStore can work only as a edge.");
+			}
+		}
+
 		_virtual_host_map[vhost_info.GetName()] = vhost;
 		_virtual_host_list.push_back(vhost);
-
 
 		// Notification 
 		for (auto &module : _module_list)
@@ -622,7 +639,7 @@ namespace ocst
 				auto remaining_part = location.Substring(origin.location.GetLength());
 
 
-				if(remaining_part.GetLength() > 0 && origin.origin_config.IsStrictLocation() ==true) {
+				if(remaining_part.GetLength() > 0 && origin._strict_location == true) {
 					logtw("This origin does not support match sub location. matched location: %s, requested location: %s", origin.location.CStr(), location.CStr());
 					continue;
 				}
@@ -895,4 +912,48 @@ namespace ocst
 
 		return info::Application::GetInvalidApplication();
 	}
+
+	void OrchestratorInternal::StorePullStream(const std::shared_ptr<pvd::Stream> &stream)
+	{
+		// lock
+		std::lock_guard<std::shared_mutex> lock(_pull_stream_map_mutex);
+		_pull_stream_map[stream->GetId()] = stream;
+	}
+	
+	void OrchestratorInternal::RemovePullStream(const info::stream_id_t &stream_id)
+	{
+		// lock
+		std::lock_guard<std::shared_mutex> lock(_pull_stream_map_mutex);
+		_pull_stream_map.erase(stream_id);
+	}
+
+	std::shared_ptr<pvd::Stream> OrchestratorInternal::GetPullStream(const info::stream_id_t &stream_id)
+	{
+		// lock
+		std::shared_lock<std::shared_mutex> lock(_pull_stream_map_mutex);
+		auto item = _pull_stream_map.find(stream_id);
+		if (item != _pull_stream_map.end())
+		{
+			return item->second;
+		}
+
+		return nullptr;
+	}
+
+	std::shared_ptr<pvd::Stream> OrchestratorInternal::GetPullStream(const info::VHostAppName &vhost_app_name, const ov::String &stream_name)
+	{
+		// lock
+		std::shared_lock<std::shared_mutex> lock(_pull_stream_map_mutex);
+		for (auto &item : _pull_stream_map)
+		{
+			auto &stream = item.second;
+			if (stream->GetApplicationInfo().GetName() == vhost_app_name && stream->GetName() == stream_name)
+			{
+				return stream;
+			}
+		}
+
+		return nullptr;
+	}
+
 }  // namespace ocst

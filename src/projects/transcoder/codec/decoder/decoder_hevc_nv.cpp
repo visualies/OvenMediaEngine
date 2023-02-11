@@ -12,14 +12,49 @@
 #include "../../transcoder_private.h"
 #include "base/info/application.h"
 
-bool DecoderHEVCxNV::Configure(std::shared_ptr<TranscodeContext> context)
+bool DecoderHEVCxNV::Configure(std::shared_ptr<MediaTrack> context)
 {
 	if (TranscodeDecoder::Configure(context) == false)
 	{
 		return false;
 	}
 
-	AVCodec *_codec = ::avcodec_find_decoder_by_name("hevc_cuvid");
+	// Initialze H.264 stream parser
+	_parser = ::av_parser_init(GetCodecID());
+	if (_parser == nullptr)
+	{
+		logte("Parser not found");
+		return false;
+	}
+	_parser->flags |= PARSER_FLAG_COMPLETE_FRAMES;
+
+	if (InitCodec() == false)
+	{
+		return false;
+	}
+
+	try
+	{
+		_kill_flag = false;
+
+		_codec_thread = std::thread(&TranscodeDecoder::CodecThread, this);
+		pthread_setname_np(_codec_thread.native_handle(), ov::String::FormatString("Dec%sNV", avcodec_get_name(GetCodecID())).CStr());
+	}
+	catch (const std::system_error &e)
+	{
+		logte("Failed to start decoder thread");
+
+		_kill_flag = true;
+
+		return false;
+	}
+
+	return true;
+}
+
+bool DecoderHEVCxNV::InitCodec()
+{
+	const AVCodec *_codec = ::avcodec_find_decoder_by_name("hevc_cuvid");
 	if (_codec == nullptr)
 	{
 		logte("Codec not found: %s (%d)", ::avcodec_get_name(GetCodecID()), GetCodecID());
@@ -33,44 +68,28 @@ bool DecoderHEVCxNV::Configure(std::shared_ptr<TranscodeContext> context)
 		return false;
 	}
 
-	_context->time_base = TimebaseToAVRational(GetTimebase());
+	_context->time_base = ffmpeg::Conv::TimebaseToAVRational(GetTimebase());
+	_context->pkt_timebase = ffmpeg::Conv::TimebaseToAVRational(GetTimebase());
 
-	::av_opt_set(_context->priv_data, "gpu_copy", "on", 0);
-
-	_context->hw_device_ctx = av_buffer_ref(TranscodeGPU::GetInstance()->GetDeviceContext());
+	_context->hw_device_ctx = ::av_buffer_ref(TranscodeGPU::GetInstance()->GetDeviceContext());
+	_context->flags |= AV_CODEC_FLAG_LOW_DELAY;
 
 	if (::avcodec_open2(_context, _codec, nullptr) < 0)
 	{
 		logte("Could not open codec: %s (%d)", ::avcodec_get_name(GetCodecID()), GetCodecID());
-		return false;
-	}
 
-	// Create packet parser
-	_parser = ::av_parser_init(_codec->id);
-	if (_parser == nullptr)
-	{
-		logte("Parser not found");
-		return false;
-	}
-
-	_parser->flags |= PARSER_FLAG_COMPLETE_FRAMES;
-
-	// Generates a thread that reads and encodes frames in the input_buffer queue and places them in the output queue.
-	try
-	{
-		_kill_flag = false;
-
-		_codec_thread = std::thread(&TranscodeDecoder::CodecThread, this);
-		pthread_setname_np(_codec_thread.native_handle(), ov::String::FormatString("Dec%sNV", avcodec_get_name(GetCodecID())).CStr());
-	}
-	catch (const std::system_error &e)
-	{
-		logte("Failed to start decoder thread");
-		_kill_flag = true;
 		return false;
 	}
 
 	return true;
+}
+
+void DecoderHEVCxNV::UninitCodec()
+{
+	::avcodec_close(_context);
+	::avcodec_free_context(&_context);
+
+	_context = nullptr;
 }
 
 void DecoderHEVCxNV::CodecThread()
@@ -87,8 +106,8 @@ void DecoderHEVCxNV::CodecThread()
 		auto buffer = std::move(obj.value());
 		auto packet_data = buffer->GetData();
 
-		int64_t remained = packet_data->GetLength();
 		off_t offset = 0LL;
+		int64_t remained = packet_data->GetLength();
 		int64_t pts = (buffer->GetPts() == -1LL) ? AV_NOPTS_VALUE : buffer->GetPts();
 		int64_t dts = (buffer->GetDts() == -1LL) ? AV_NOPTS_VALUE : buffer->GetDts();
 		[[maybe_unused]] int64_t duration = (buffer->GetDuration() == -1LL) ? AV_NOPTS_VALUE : buffer->GetDuration();
@@ -98,13 +117,25 @@ void DecoderHEVCxNV::CodecThread()
 		{
 			::av_packet_unref(_pkt);
 
-			int parsed_size = ::av_parser_parse2(_parser, _context, &_pkt->data, &_pkt->size,
-												 data + offset, static_cast<int>(remained), pts, dts, 0);
-
+			int parsed_size = ::av_parser_parse2(_parser, _context, &_pkt->data, &_pkt->size, data + offset, static_cast<int>(remained), pts, dts, 0);
 			if (parsed_size < 0)
 			{
 				logte("An error occurred while parsing: %d", parsed_size);
 				break;
+			}
+
+			// NVIDIA H.265 decoder does not support dynamic resolution streams.
+			// So, when a resolution change is detected, the codec is reset and recreated.
+			if (_context->width != 0 && _context->height != 0 && (_parser->width != _context->width || _parser->height != _context->height))
+			{
+				logti("Changed input resolution of %u track. (%dx%d -> %dx%d)", GetRefTrack()->GetId(), _context->width, _context->height, _parser->width, _parser->height);
+
+				UninitCodec();
+
+				if(InitCodec() == false)
+				{
+					break;
+				}
 			}
 
 			if (_pkt->size > 0)
@@ -113,9 +144,9 @@ void DecoderHEVCxNV::CodecThread()
 				_pkt->dts = _parser->dts;
 				_pkt->flags = (_parser->key_frame == 1) ? AV_PKT_FLAG_KEY : 0;
 				_pkt->duration = _pkt->dts - _parser->last_dts;
-				if(_pkt->duration <= 0LL)
+				if (_pkt->duration <= 0LL)
 				{
-					// It may not be the exact packet duration. 
+					// It may not be the exact packet duration.
 					// However, in general, this method is applied under the assumption that the duration of all packets is similar.
 					_pkt->duration = duration;
 				}
@@ -230,9 +261,8 @@ void DecoderHEVCxNV::CodecThread()
 				}
 				tmp_frame->pts = _frame->pts;
 
-
 				// If there is no duration, the duration is calculated by framerate and timebase.
-				tmp_frame->pkt_duration = (tmp_frame->pkt_duration <= 0LL) ? ffmpeg::Conv::GetDurationPerFrame(cmn::MediaType::Video, _input_context) : tmp_frame->pkt_duration;
+				tmp_frame->pkt_duration = (tmp_frame->pkt_duration <= 0LL) ? ffmpeg::Conv::GetDurationPerFrame(cmn::MediaType::Video, GetRefTrack()) : tmp_frame->pkt_duration;
 
 				auto decoded_frame = ffmpeg::Conv::ToMediaFrame(cmn::MediaType::Video, tmp_frame);
 				if (decoded_frame == nullptr)
@@ -243,7 +273,7 @@ void DecoderHEVCxNV::CodecThread()
 				::av_frame_unref(_frame);
 				::av_frame_free(&sw_frame);
 
-				SendOutputBuffer(need_to_change_notify, _track_id, std::move(decoded_frame));
+				SendOutputBuffer(need_to_change_notify ? TranscodeResult::FormatChanged : TranscodeResult::DataReady, std::move(decoded_frame));
 			}
 		}
 	}

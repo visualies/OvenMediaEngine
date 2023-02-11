@@ -64,6 +64,12 @@ To use LLHLS, you need to add the `<LLHLS>` elements to the `<Publishers>` in th
 HTTP/2 outperforms HTTP/1.1, especially with LLHLS. Since all current browsers only support h2, HTTP/2 is supported only on TLS port. Therefore, it is highly recommended to use LLHLS on the TLS port.
 {% endhint %}
 
+## Adaptive Bitrates Streaming (ABR)
+
+LLHLS can deliver adaptive bitrate streaming. OME encodes the same source with multiple renditions and delivers it to the players. And LLHLS Player, including OvenPlayer, selects the best quality rendition according to its network environment. Of course, these players also provide option for users to manually select rendition.
+
+See the [Adaptive Bitrates Streaming](../transcoding/#adaptive-bitrates-streaming-abr) section for how to configure renditions.
+
 ## CrossDomain
 
 Most browsers and players prohibit accessing other domain resources in the currently running domain. You can control this situation through Cross-Origin Resource Sharing (CORS) or Cross-Domain (CrossDomain). You can set CORS and Cross-Domain as `<CrossDomains>` element.
@@ -120,3 +126,78 @@ If you use the default configuration, you can start streaming with the following
 `https://domain:3334/app/<stream name>/llhls.m3u8`
 
 We have prepared a test player that you can quickly see if OvenMediaEngine is working. Please refer to the [Test Player](../test-player.md) for more information.
+
+
+
+## Live Rewind
+
+You can create as long a playlist as you want by setting `<DVR>` to the LLHLS publisher as shown below. This allows the player to rewind the live stream and play older segments. OvenMediaEngine stores and uses old segments in a file in `<DVR><TempStoragePath>` to prevent excessive memory usage. It stores as much as `<DVR><MaxDuration>` and the unit is seconds.
+
+```xml
+<LLHLS>
+	...
+	<DVR>
+		<Enable>true</Enable>
+		<TempStoragePath>/tmp/ome_dvr/</TempStoragePath>
+		<MaxDuration>3600</MaxDuration>
+	</DVR>
+	...
+</LLHLS>
+```
+
+## ID3v2 Timed Metadata
+
+ID3 Timed metadata can be sent to the LLHLS stream through the [Send Event API](../rest-api/v1/virtualhost/application/stream/send-event.md).
+
+
+
+## Dump
+
+You can dump the LLHLS stream for VoD. You can enable it by setting the following in `<Application><Publishers><LLHLS>`. Dump function can also be controlled by [Dump API](../rest-api/v1/virtualhost/application/stream/hls-dump.md).
+
+```xml
+<LLHLS>
+<Dumps>
+	<Dump>
+		<Enable>true</Enable>
+		<TargetStreamName>stream*</TargetStreamName>
+		
+		<Playlists>
+			<Playlist>llhls.m3u8</Playlist>
+			<Playlist>abr.m3u8</Playlist>
+		</Playlists>
+
+		<OutputPath>/service/www/ome-dev.airensoft.com/html/${VHostName}_${AppName}_${StreamName}/${YYYY}_${MM}_${DD}_${hh}_${mm}_${ss}</OutputPath>
+	</Dump>
+</Dumps>
+        ...
+</LLHLS>
+```
+
+**TargetStreamName**
+
+&#x20;   The name of the stream to dump to. You can use \* and ? to filter stream names.
+
+**Playlists**
+
+&#x20;   The name of the master playlist file to be dumped together.
+
+**OutputPath**
+
+&#x20;   The folder to output to. In the OutputPath you can use the macros shown in the table below. You must have write permission on the specified folder.
+
+| Macro         | Description                    |
+| ------------- | ------------------------------ |
+| ${VHostName}  | Virtual Host Name              |
+| ${AppName}    | Application Name               |
+| ${StreamName} | Stream Name                    |
+| ${YYYY}       | Year                           |
+| ${MM}         | Month                          |
+| ${DD}         | Day                            |
+| ${hh}         | Hour                           |
+| ${mm}         | Minute                         |
+| ${ss}         | Second                         |
+| ${S}          | Timezone                       |
+| ${z}          | UTC offset (ex: +0900)         |
+| ${ISO8601}    | Current time in ISO8601 format |
+

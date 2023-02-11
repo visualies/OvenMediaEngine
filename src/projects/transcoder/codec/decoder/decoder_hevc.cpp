@@ -11,14 +11,14 @@
 #include "../../transcoder_private.h"
 #include "base/info/application.h"
 
-bool DecoderHEVC::Configure(std::shared_ptr<TranscodeContext> context)
+bool DecoderHEVC::Configure(std::shared_ptr<MediaTrack> context)
 {
 	if (TranscodeDecoder::Configure(context) == false)
 	{
 		return false;
 	}
 
-	AVCodec *_codec = ::avcodec_find_decoder(GetCodecID());
+	const AVCodec *_codec = ::avcodec_find_decoder(GetCodecID());
 	if (_codec == nullptr)
 	{
 		logte("Codec not found: %s (%d)", ::avcodec_get_name(GetCodecID()), GetCodecID());
@@ -32,7 +32,7 @@ bool DecoderHEVC::Configure(std::shared_ptr<TranscodeContext> context)
 		return false;
 	}
 
-	_context->time_base = TimebaseToAVRational(GetTimebase());
+	_context->time_base = ffmpeg::Conv::TimebaseToAVRational(GetTimebase());
 
 	if (::avcodec_open2(_context, _codec, nullptr) < 0)
 	{
@@ -110,9 +110,9 @@ void DecoderHEVC::CodecThread()
 				_pkt->dts = _parser->dts;
 				_pkt->flags = (_parser->key_frame == 1) ? AV_PKT_FLAG_KEY : 0;
 				_pkt->duration = _pkt->dts - _parser->last_dts;
-				if(_pkt->duration <= 0LL)
+				if (_pkt->duration <= 0LL)
 				{
-					// It may not be the exact packet duration. 
+					// It may not be the exact packet duration.
 					// However, in general, this method is applied under the assumption that the duration of all packets is similar.
 					_pkt->duration = duration;
 				}
@@ -214,7 +214,7 @@ void DecoderHEVC::CodecThread()
 				}
 
 				// If there is no duration, the duration is calculated by framerate and timebase.
-				_frame->pkt_duration = (_frame->pkt_duration <= 0LL) ? ffmpeg::Conv::GetDurationPerFrame(cmn::MediaType::Video, _input_context) : _frame->pkt_duration;
+				_frame->pkt_duration = (_frame->pkt_duration <= 0LL) ? ffmpeg::Conv::GetDurationPerFrame(cmn::MediaType::Video, GetRefTrack()) : _frame->pkt_duration;
 
 				auto decoded_frame = ffmpeg::Conv::ToMediaFrame(cmn::MediaType::Video, _frame);
 				::av_frame_unref(_frame);
@@ -223,7 +223,7 @@ void DecoderHEVC::CodecThread()
 					continue;
 				}
 
-				SendOutputBuffer(need_to_change_notify, _track_id, std::move(decoded_frame));
+				SendOutputBuffer(need_to_change_notify ? TranscodeResult::FormatChanged : TranscodeResult::DataReady, std::move(decoded_frame));
 			}
 		}
 	}

@@ -82,7 +82,7 @@ namespace pvd
 					auto current = std::chrono::high_resolution_clock::now();
 
 					// Default Properties of PullStream
-					auto is_persist = false;
+					auto is_persistent = false;
 					auto is_failback = false;
 					auto no_input_timeout = GetHostInfo().GetOrigins().GetProperties().GetNoInputFailoverTimeout(); 
 					auto unused_stream_timeout = GetHostInfo().GetOrigins().GetProperties().GetUnusedStreamDeletionTimeout();
@@ -91,7 +91,7 @@ namespace pvd
 					auto props = stream->GetProperties();
 					if (props)
 					{
-						is_persist = props->IsPersist();
+						is_persistent = props->IsPersistent();
 						is_failback = props->IsFailback();
 					
 						// If Failback is enabled, try to connect periodically to see if the Primary URL is available.
@@ -107,7 +107,7 @@ namespace pvd
 							
 								auto ping_props = std::make_shared<pvd::PullStreamProperties>();
 								ping_props->SetRetryConnectCount(0);
-								auto ping = CreateStream(0, "_CHECK_FOR_FAILBACK_STREAM_", {failback_url}, ping_props);
+								auto ping = CreateStream(0, "_ping_for_failback_", {failback_url}, ping_props);
 								if (ping)
 								{
 									auto state = ping->GetState() ;
@@ -117,9 +117,7 @@ namespace pvd
 									{
 										// Stop the current stream and switch to the Primary URL.
 										stream->Stop();
-										
 										stream->ResetUrlIndex();
-
 										ResumeStream(stream);
 									}
 									
@@ -141,13 +139,13 @@ namespace pvd
 						auto elapsed_time_from_last_sent = std::chrono::duration_cast<std::chrono::milliseconds>(current - stream_metrics->GetLastSentTime()).count();
 						auto elapsed_time_from_last_recv = std::chrono::duration_cast<std::chrono::milliseconds>(current - stream_metrics->GetLastRecvTime()).count();
 
-						if((elapsed_time_from_last_sent > unused_stream_timeout) && (!is_persist))
+						if((elapsed_time_from_last_sent > unused_stream_timeout) && (!is_persistent))
 						{
 							logtw("%s/%s(%u) stream will be deleted because it hasn't been used for %u milliseconds", stream->GetApplicationInfo().GetName().CStr(), stream->GetName().CStr(), stream->GetId(), elapsed_time_from_last_sent);
 							DeleteStream(stream);
 						}
 						// The stream type is pull stream, if packets do NOT arrive for more than 3 seconds, it is a seriously warning situation
-						else if(elapsed_time_from_last_recv > no_input_timeout && (!is_persist))
+						else if(elapsed_time_from_last_recv > no_input_timeout && (!is_persistent))
 						{
 							logtw("Stop stream %s/%s(%u) : there are no incoming packets. %d milliseconds have elapsed since the last packet was received.",
 								  stream->GetApplicationInfo().GetName().CStr(), stream->GetName().CStr(), stream->GetId(), elapsed_time_from_last_recv);
@@ -228,24 +226,20 @@ namespace pvd
 		return true;
 	}
 
-	std::shared_ptr<pvd::Stream> PullApplication::CreateStream(const ov::String &stream_name, const std::vector<ov::String> &url_list, std::shared_ptr<pvd::PullStreamProperties> properties)
+	std::shared_ptr<pvd::Stream> PullApplication::CreateStream(const ov::String &stream_name, const std::vector<ov::String> &url_list, const std::shared_ptr<pvd::PullStreamProperties> &properties)
 	{
-		// Check if same stream name is exist in MediaRouter(may be created by another provider)
-		if(IsExistingInboundStream(stream_name) == true)
-		{
-			logtw("Reject stream creation : there is already an incoming stream with the same name. (%s)", stream_name.CStr());
-			return nullptr;
-		}
-
-		auto stream = CreateStream(IssueUniqueStreamId(), stream_name, url_list, properties);
+		auto stream = CreateStream(pvd::Application::IssueUniqueStreamId(), stream_name, url_list, properties);
 		if(stream == nullptr)
 		{
 			return nullptr;
 		}
 
-		std::unique_lock<std::shared_mutex> streams_lock(_streams_guard);
+		if (AddStream(stream) == false)
+		{
+			logte("Could not add stream : %s/%s(%u)", stream->GetApplicationInfo().GetName().CStr(), stream->GetName().CStr(), stream->GetId());
+			return nullptr;
+		}
 
-		_streams[stream->GetId()] = stream;
 		auto motor = GetStreamMotorInternal(stream);
 		if(motor == nullptr)
 		{
@@ -256,11 +250,6 @@ namespace pvd
 				return nullptr;
 			}
 		}
-
-		streams_lock.unlock();
-
-		// Notify first
-		NotifyStreamCreated(stream);
 
 		// And push data next
 		motor->AddStream(stream);

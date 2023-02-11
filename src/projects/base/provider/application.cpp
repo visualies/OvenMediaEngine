@@ -12,6 +12,7 @@
 #include "stream.h"
 #include "provider_private.h"
 
+#include "orchestrator/orchestrator.h"
 namespace pvd
 {
 	Application::Application(const std::shared_ptr<Provider> &provider, const info::Application &application_info)
@@ -99,8 +100,84 @@ namespace pvd
 
 	bool Application::AddStream(const std::shared_ptr<Stream> &stream)
 	{
+		// Check if same stream name is exist in MediaRouter(may be created by another provider)
+		if (IsExistingInboundStream(stream->GetName()) == true)
+		{
+			logtw("Reject to add stream : there is already an incoming stream (%s) with the same name in application(%s) ", stream->GetName().CStr(), GetName().CStr());
+			return false;
+		}
+
+		// If provider is OVT, it is running in Edge mode.
+		if (_provider->GetProviderType() != ProviderType::Ovt)
+		{
+			// Register stream if OriginMapStore is enabled
+			auto result = ocst::Orchestrator::GetInstance()->RegisterStreamToOriginMapStore(GetName(), stream->GetName());
+			if (result == CommonErrorCode::ERROR)
+			{
+				logtw("Reject to add stream : failed to register stream to origin map store");
+				return false;
+			}
+		}
+
+		// If there is no data track, add data track
+		if (stream->GetFirstTrackByType(cmn::MediaType::Data) == nullptr)
+		{
+			// Add data track 
+			auto data_track = std::make_shared<MediaTrack>();
+			// Issue unique track id
+			data_track->SetId(stream->IssueUniqueTrackId());
+			auto public_name = ov::String::FormatString("Data_%d", data_track->GetId());
+			data_track->SetPublicName(public_name);
+			data_track->SetMediaType(cmn::MediaType::Data);
+			data_track->SetTimeBase(1, 1000);
+			data_track->SetOriginBitstream(cmn::BitstreamFormat::Unknown);
+			
+			stream->AddTrack(data_track);
+		}
+
 		stream->SetApplication(GetSharedPtrAs<Application>());
 		stream->SetApplicationInfo(GetSharedPtrAs<Application>());
+
+		// This is not an official feature
+		// OutputProfile(without encoding) is not applied to a specific provider.
+		// To reduce transcoding cost when using Persistent Stream
+		if (_provider->GetProviderType() == ProviderType::Rtmp)
+		{
+			if(GetConfig().GetProviders().GetRtmpProvider().IsPassthroughOutputProfile() == true)
+			{
+				stream->SetRepresentationType(StreamRepresentationType::Relay);
+			}
+		}
+
+		// Add mapped audio track info
+		auto audio_map_item_count = GetAudioMapItemCount();
+		if (audio_map_item_count > 0)
+		{
+			for (size_t index=0; index < audio_map_item_count; index++)
+			{
+				auto audio_map_item = GetAudioMapItem(index);
+				auto audio_track = stream->GetMediaTrackByOrder(cmn::MediaType::Audio, index);
+				if (audio_map_item == nullptr || audio_track == nullptr)
+				{
+					break;
+				}
+
+				audio_track->SetPublicName(audio_map_item->GetName());
+				audio_track->SetLanguage(audio_map_item->GetLanguage());
+			}
+		}
+
+		// If track has not PublicName, set PublicName as TrackId
+		for (auto &it : stream->GetTracks())
+		{
+			auto track = it.second;
+			if (track->GetPublicName().IsEmpty())
+			{
+				// MediaType_TrackId
+				auto public_name = ov::String::FormatString("%s_%u", cmn::GetMediaTypeString(track->GetMediaType()).CStr(), track->GetId());
+				track->SetPublicName(public_name);
+			}
+		}
 
 		std::unique_lock<std::shared_mutex> streams_lock(_streams_guard);
 		_streams[stream->GetId()] = stream;
@@ -127,6 +204,18 @@ namespace pvd
 		stream->Stop();
 
 		NotifyStreamDeleted(stream);
+
+		// If provider is OVT, it is running in Edge mode.
+		if (_provider->GetProviderType() != ProviderType::Ovt)
+		{
+			// Unegister stream if OriginMapStore is enabled
+			auto result = ocst::Orchestrator::GetInstance()->UnregisterStreamFromOriginMapStore(GetName(), stream->GetName());
+			if (result == CommonErrorCode::ERROR)
+			{
+				logtw("Reject to add stream : failed to register stream to origin map store");
+				return false;
+			}
+		}
 
 		return true;
 	}

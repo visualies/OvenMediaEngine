@@ -16,12 +16,23 @@ EncoderFFOPUS::~EncoderFFOPUS()
 
 bool EncoderFFOPUS::SetCodecParams()
 {
-	_codec_context->bit_rate = _encoder_context->GetBitrate();
-	_codec_context->sample_fmt = AV_SAMPLE_FMT_S16;
-	_codec_context->sample_rate = _encoder_context->GetAudioSampleRate();
-	_codec_context->channel_layout = static_cast<uint64_t>(_encoder_context->GetAudioChannel().GetLayout());
-	_codec_context->channels = _encoder_context->GetAudioChannel().GetCounts();
-	_codec_context->cutoff = 12000;	 // SuperWideBand
+	_codec_context->bit_rate = GetRefTrack()->GetBitrate();
+	_codec_context->sample_fmt = (AVSampleFormat)GetSupportedFormat();
+	_codec_context->sample_rate = GetRefTrack()->GetSampleRate();
+	_codec_context->channel_layout = static_cast<uint64_t>(GetRefTrack()->GetChannel().GetLayout());
+	_codec_context->channels = GetRefTrack()->GetChannel().GetCounts();
+	
+	// Support Frequency
+	// 4000 - OPUS_BANDWIDTH_NARROWBAND (8kHz) (2~8 kbps)
+	// 6000 - OPUS_BANDWIDTH_MEDIUMBAND (12kHz)
+	// 8000 - OPUS_BANDWIDTH_WIDEBAND (16kHz) (9~12 kbps)
+	// 12000 - OPUS_BANDWIDTH_SUPERWIDEBAND (24kHz)
+	// 20000 - OPUS_BANDWIDTH_FULLBAND (48kHz) (13~2048 kbps)
+	// _codec_context->cutoff = 20000;	 
+
+	// Compression Level (0~10)
+	// 0 Low quality and fast encoding (less CPU usage)
+	// 10 - High quality, slow encoding (high CPU usage)
 	_codec_context->compression_level = 10;
 
 	::av_opt_set(_codec_context->priv_data, "application", "lowdelay", 0);
@@ -32,7 +43,7 @@ bool EncoderFFOPUS::SetCodecParams()
 	return true;
 }
 
-bool EncoderFFOPUS::Configure(std::shared_ptr<TranscodeContext> output_context)
+bool EncoderFFOPUS::Configure(std::shared_ptr<MediaTrack> output_context)
 {
 	if (TranscodeEncoder::Configure(output_context) == false)
 	{
@@ -40,7 +51,7 @@ bool EncoderFFOPUS::Configure(std::shared_ptr<TranscodeContext> output_context)
 	}
 
 	auto codec_id = GetCodecID();
-	AVCodec *codec = ::avcodec_find_encoder(codec_id);
+	const AVCodec *codec = ::avcodec_find_encoder(codec_id);
 	if (codec == nullptr)
 	{
 		logte("Codec not found: %s (%d)", ::avcodec_get_name(codec_id), codec_id);
@@ -66,7 +77,7 @@ bool EncoderFFOPUS::Configure(std::shared_ptr<TranscodeContext> output_context)
 		return false;
 	}
 
-	_encoder_context->SetAudioSamplesPerFrame(_codec_context->frame_size);
+	GetRefTrack()->SetAudioSamplesPerFrame(_codec_context->frame_size);
 
 	// Generates a thread that reads and encodes frames in the input_buffer queue and places them in the output queue.
 	try

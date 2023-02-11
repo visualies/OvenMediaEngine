@@ -8,6 +8,8 @@ extern "C"
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
+#include <libavutil/channel_layout.h>
+
 };
 
 class FileTrackInfo
@@ -152,6 +154,8 @@ private:
 	AVFormatContext *_format_context;
 	int64_t _start_time;
 	bool _timestamp_recalc_mode;
+	bool _need_to_flush;
+	bool _need_to_close;
 
 	// <MediaTrack.id, std::hsared_ptr<FileTrackInfo>>
 	std::map<int32_t, std::shared_ptr<FileTrackInfo>> _tracks;

@@ -20,12 +20,17 @@ public:
 		return AV_CODEC_ID_AAC;
 	}
 
-	int GetPixelFormat() const noexcept override
+	int GetSupportedFormat() const noexcept override
 	{
-		return AV_PIX_FMT_NONE;
+		return AV_SAMPLE_FMT_S16;
 	}
 
-	bool Configure(std::shared_ptr<TranscodeContext> output_context) override;
+	cmn::BitstreamFormat GetBitstreamFormat() const noexcept override
+	{
+		return cmn::BitstreamFormat::AAC_ADTS;
+	}
+
+	bool Configure(std::shared_ptr<MediaTrack> output_context) override;
 
 	void CodecThread() override;
 

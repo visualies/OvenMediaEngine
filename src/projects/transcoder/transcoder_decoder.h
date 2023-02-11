@@ -14,40 +14,40 @@
 class TranscodeDecoder : public TranscodeBase<MediaPacket, MediaFrame>
 {
 public:
+	typedef std::function<void(TranscodeResult, int32_t, std::shared_ptr<MediaFrame>)> CompleteHandler;
+
+public:
 	TranscodeDecoder(info::Stream stream_info);
 	~TranscodeDecoder() override;
 
-	static std::shared_ptr<TranscodeDecoder> CreateDecoder(const info::Stream &info, std::shared_ptr<TranscodeContext> context);
+	static std::shared_ptr<TranscodeDecoder> Create(int32_t decoder_id, const info::Stream &info, std::shared_ptr<MediaTrack> track,  CompleteHandler complete_handler);
 
-	void SetTrackId(int32_t track_id);
+	void SetDecoderId(int32_t decoder_id);
 
-	bool Configure(std::shared_ptr<TranscodeContext> context) override;
+	bool Configure(std::shared_ptr<MediaTrack> track) override;
 
 	void SendBuffer(std::shared_ptr<const MediaPacket> packet) override;
-	void SendOutputBuffer(bool change_format, int32_t track_id, std::shared_ptr<MediaFrame> frame);
+	void SendOutputBuffer(TranscodeResult result, std::shared_ptr<MediaFrame> frame);
+	
+	std::shared_ptr<MediaTrack> &GetRefTrack();
 
-	std::shared_ptr<MediaFrame> RecvBuffer(TranscodeResult *result) override;
-
-	std::shared_ptr<TranscodeContext> &GetContext();
-
-	cmn::Timebase GetTimebase() const;
+	cmn::Timebase GetTimebase();
 
 	virtual void CodecThread() = 0;
 
 	virtual void Stop();
 
-	typedef std::function<void(TranscodeResult, int32_t)> _cb_func;
-	_cb_func OnCompleteHandler;
-	void SetOnCompleteHandler(_cb_func func)
+	void SetCompleteHandler(CompleteHandler complete_handler)
 	{
-		OnCompleteHandler = move(func);
+		_complete_handler = move(complete_handler);
 	}
 
 protected:
 	static const ov::String ShowCodecParameters(const AVCodecContext *context, const AVCodecParameters *parameters);
 
-	std::shared_ptr<TranscodeContext> _input_context;
-	int32_t _track_id;
+	int32_t _decoder_id;
+
+	std::shared_ptr<MediaTrack> _track;
 
 	AVCodecContext *_context = nullptr;
 	AVCodecParserContext *_parser = nullptr;
@@ -62,4 +62,6 @@ protected:
 
 	bool _kill_flag = false;
 	std::thread _codec_thread;
+
+	CompleteHandler _complete_handler;
 };

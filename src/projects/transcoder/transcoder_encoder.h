@@ -13,20 +13,23 @@
 class TranscodeEncoder : public TranscodeBase<MediaFrame, MediaPacket>
 {
 public:
+	typedef std::function<void(int32_t, std::shared_ptr<MediaPacket>)> CompleteHandler;
+
+public:
 	TranscodeEncoder();
 	~TranscodeEncoder() override;
 
-	static std::shared_ptr<TranscodeEncoder> CreateEncoder(std::shared_ptr<TranscodeContext> output_context);
-	void SetTrackId(int32_t track_id);
+	static std::shared_ptr<TranscodeEncoder> Create(int32_t encoder_id, std::shared_ptr<MediaTrack> output_track, CompleteHandler complete_handler);
+	void SetEncoderId(int32_t encdoer_id);
 
-	virtual int GetPixelFormat() const noexcept = 0;
-
-	bool Configure(std::shared_ptr<TranscodeContext> context) override;
+	virtual int GetSupportedFormat() const noexcept = 0;
+	virtual cmn::BitstreamFormat GetBitstreamFormat() const noexcept = 0;
+	bool Configure(std::shared_ptr<MediaTrack> output_track) override;
 
 	void SendBuffer(std::shared_ptr<const MediaFrame> frame) override;
 	void SendOutputBuffer(std::shared_ptr<MediaPacket> packet);
 
-	std::shared_ptr<TranscodeContext> &GetContext();
+	std::shared_ptr<MediaTrack> &GetRefTrack();
 
 	virtual void CodecThread() = 0;
 
@@ -34,24 +37,21 @@ public:
 
 	cmn::Timebase GetTimebase() const;
 
-	// TODO(soulk): The encoder and decoder are also changed to the way callback is called
-	// when the encoder and decoder are completed.
-	typedef std::function<TranscodeResult(int32_t)> _cb_func;
-	_cb_func OnCompleteHandler;
-	void SetOnCompleteHandler(_cb_func func)
-	{
-		OnCompleteHandler = move(func);
-	}
 
-	std::shared_ptr<MediaPacket> RecvBuffer(TranscodeResult *result) override;
+public:
+
+	void SetCompleteHandler(CompleteHandler complete_handler)
+	{
+		_complete_handler = move(complete_handler);
+	}
 
 private:
 	virtual bool SetCodecParams() = 0;
 
 protected:
-	std::shared_ptr<TranscodeContext> _encoder_context = nullptr;
+	std::shared_ptr<MediaTrack> _track = nullptr;
 
-	int32_t _track_id;
+	int32_t _encoder_id;
 
 	AVCodecContext *_codec_context = nullptr;
 	AVCodecParserContext *_parser = nullptr;
@@ -64,4 +64,7 @@ protected:
 
 	bool _kill_flag = false;
 	std::thread _codec_thread;
+
+	CompleteHandler _complete_handler;
+
 };
